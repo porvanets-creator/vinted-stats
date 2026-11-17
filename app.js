@@ -25,6 +25,10 @@ const ICONS = {
   check:'<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   users:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 19.5c1-3.5 3.5-5.5 6.5-5.5s5.5 2 6.5 5.5"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.3c1.7.9 2.9 2.6 3.5 5.2"/></svg>',
   chev:'<svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  id:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="11" r="2.2"/><path d="M5.8 16c.6-1.6 1.8-2.4 3.2-2.4s2.6.8 3.2 2.4M14.5 10h4M14.5 13.5h3"/></svg>',
+  mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>',
+  phone:'<svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+  pen:'<svg viewBox="0 0 24 24"><path d="M4 20l4-1 10.5-10.5a2.1 2.1 0 0 0-3-3L5 16z"/><path d="M14 7l3 3"/></svg>',
   coin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/></svg>'
 };
 
@@ -51,7 +55,7 @@ const shiftYM = (ym, k) => { let y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + 
 const daysIn = ym => new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
 const todayISO = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
 const hm = min => { if (min == null) return '—'; const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h} год ${String(m).padStart(2, '0')} хв`; };
-const hmShort = min => { if (!min) return '0:00'; const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h}:${String(m).padStart(2, '0')}`; };
+const hmShort = min => { if (!min) return '0 год'; const t = Math.round(min), h = Math.floor(t / 60), m = t % 60; return h && m ? `${h} год ${m} хв` : h ? `${h} год` : `${m} хв`; };
 const sum = (arr, f) => r2(arr.reduce((a, x) => a + (+f(x) || 0), 0));
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function pct(cur, prev) {
@@ -160,6 +164,8 @@ function renderNav() {
     ${sw('avg', 'star', 'Середній чек', show('avg'))}
     ${sw('bestm', 'trophy', 'Найкращий місяць', show('bestm'))}
     ${sw('bestd', 'cal', 'Найкращі дні', show('bestd'))}
+    ${sw('goal', 'target', 'Ціль', show('goal'))}
+    ${sw('hourly', 'clock', 'Вартість години', show('hourly'))}
     <hr>
     <a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
   $('#navFoot').querySelectorAll('[data-sw]').forEach(b => b.onclick = () => {
@@ -288,6 +294,10 @@ function viewAccount(id) {
   setTitle(id);
   const st = $('#pageStatus'); st.textContent = acc.status === 'archive' ? '● Архів' : '● Активний'; st.className = 'status' + (acc.status === 'archive' ? ' archive' : '');
   const p = P(), all = sales(id), cur = forP(all, p);
+  const dataOpen = store.get('vs_data_open') !== '0';
+  const infoRow = (icon, label, v) => `<div class="info-row" ${v ? `data-copy="${esc(v)}"` : ''}>${ICONS[icon]}<span class="muted">${label}</span><b>${v ? esc(v) : '<span class="muted">не вказано</span>'}</b></div>`;
+  const dataCard = `<div class="card data-card"><div class="card-head"><button class="data-toggle ${dataOpen ? 'open' : ''}" id="dataToggle">${ICONS.id}<span>Дані</span>${ICONS.chev}</button><button class="mini-btn" id="dataEdit" aria-label="Змінити дані">${ICONS.pen}</button></div>
+    <div class="data-body" ${dataOpen ? '' : 'hidden'}>${infoRow('mail', 'Пошта', acc.email)}${infoRow('phone', 'Телефон', acc.phone)}</div></div>`;
   const S_ = (a, b) => sum(inRange(all, a, b), x => x.amount), I_ = (a, b) => sum(inRange(all, a, b), x => x.items);
   const A_ = (a, b) => { const i = I_(a, b); return i ? S_(a, b) / i : 0; };
   const sCur = sum(cur, x => x.amount), iCur = sum(cur, x => x.items), avg = iCur ? sCur / iCur : 0;
@@ -308,7 +318,7 @@ function viewAccount(id) {
   const sP = p.prev ? S_(p.prev.start, p.prev.end) : 0, sS = p.same ? S_(p.same.start, p.same.end) : 0;
   const dayCount = byDay(cur).length;
 
-  $('#view').innerHTML = `
+  $('#view').innerHTML = `${dataCard}
   <div class="grid ${show('avg') ? 'g3' : ''}">
     ${kpi('cal', perLabel(p, 'Продажі за місяць', 'Продажі за рік'), money(sCur), cmp(sCur, S_, p) + (p.kind === 'all' && firstDate ? `<div class="sub">з ${dmy(firstDate)}</div>` : ''), 'dark')}
     ${kpi('box', 'Кількість проданих речей', iCur, cmp(iCur, I_, p))}
@@ -330,6 +340,23 @@ function viewAccount(id) {
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
   if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
+  $('#dataToggle').onclick = () => { const b = $('.data-body'), open = b.hidden; b.hidden = !open; $('#dataToggle').classList.toggle('open', open); store.set('vs_data_open', open ? '1' : '0'); };
+  $('#dataEdit').onclick = () => accountDataForm(acc);
+  $('#view').querySelectorAll('[data-copy]').forEach(r => r.onclick = async () => { try { await navigator.clipboard.writeText(r.dataset.copy); toast('Скопійовано'); } catch (e) { toast(r.dataset.copy); } });
+}
+function accountDataForm(acc) {
+  openSheet(`<h3>Дані · ${esc(acc.id)}</h3>
+    <label class="field"><span>Пошта</span><input id="fMail" type="email" autocomplete="off" value="${esc(acc.email || '')}" placeholder="name@gmail.com"></label>
+    <label class="field"><span>Телефон</span><input id="fPhone" type="tel" autocomplete="off" value="${esc(acc.phone || '')}" placeholder="+48 …"></label>
+    <button class="btn" id="ok">Зберегти</button>
+    <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
+    el.querySelector('#cancel').onclick = closeSheet;
+    el.querySelector('#ok').onclick = async () => {
+      const email = el.querySelector('#fMail').value.trim(), phone = el.querySelector('#fPhone').value.trim();
+      closeSheet();
+      await save(`Дані акаунта ${acc.id}`, d => Object.assign(d.accounts.find(a => a.id === acc.id), { email, phone }));
+    };
+  });
 }
 const cmpOff = () => store.get('vs_cmp_off') === '1';
 const show = k => store.get('vs_hide_' + k) !== '1';
@@ -380,14 +407,17 @@ function viewPanel() {
     return { k, s, n, e, p: r2(s - e), w };
   });
 
+  const halves = [
+    show('avg') && (c => kpi('star', 'Середній чек', money(iCur ? sCur / iCur : 0), cmp(iCur ? sCur / iCur : 0, A_, p), c)),
+    c => kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(eCur), cmp(eCur, E_, p, true), c),
+    c => kpi('coin', 'Чистий прибуток', money(profit), cmp(profit, PR_, p), c),
+    show('hourly') && (c => kpi('clock', 'Вартість години', mCur ? money(hourly) : '—', `${mCur ? cmp(hourly, H_, p) : ''}<div class="sub">${hmShort(mCur)} роботи (приблизно)${mCur && p.start < wFirst ? ` · рахується з ${dmy(wFirst)}` : ''}</div>`, c))
+  ].filter(Boolean);
   $('#view').innerHTML = `
   <div class="grid g3">
     <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same && !cmpOff() ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей</div></div>
-    ${show('avg') ? kpi('star', 'Середній чек', money(iCur ? sCur / iCur : 0), cmp(iCur ? sCur / iCur : 0, A_, p)) : ''}
-    ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(eCur), cmp(eCur, E_, p, true))}
-    ${kpi('coin', 'Чистий прибуток', money(profit), cmp(profit, PR_, p))}
-    ${kpi('clock', 'Вартість години', mCur ? money(hourly) : '—', `${mCur ? cmp(hourly, H_, p) : ''}<div class="sub">${hmShort(mCur)} год роботи (приблизно)${mCur && p.start < wFirst ? ` · рахується з ${dmy(wFirst)}` : ''}</div>`, show('avg') ? '' : 'span2-m')}
-    ${p.kind === 'all' ? '' : `<div class="card span2-m"><div class="label">${ICONS.target}${perLabel(p, 'Ціль на місяць', 'Ціль на рік')}</div><div class="mid">Виконано ${Math.round(goalP)}%</div>
+    ${halves.map((h, i) => h(i === halves.length - 1 && halves.length % 2 ? 'span2-m' : '')).join('')}
+    ${p.kind === 'all' || !show('goal') ? '' : `<div class="card span2-m"><div class="label">${ICONS.target}${perLabel(p, 'Ціль на місяць', 'Ціль на рік')}</div><div class="mid">Виконано ${Math.round(goalP)}%</div>
       <div class="progress"><i style="width:${goalP}%"></i></div>
       <div class="goal-row"><span>${money(sCur)}</span><span>з ${money(goal)}</span></div>
       <div class="sub" style="margin-top:8px">${ICONS.trend.replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px"')} Прогноз на кінець ${p.kind === 'year' ? 'року' : 'місяця'}: <b style="color:var(--ink)">${money(forecast)}</b></div></div>`}
@@ -396,13 +426,8 @@ function viewPanel() {
     ${!show('bestd') ? '' : `<div class="card ${show('bestm') ? '' : 'span2'}"><div class="label">${ICONS.star}${perLabel(p, 'Найкращий день місяця', 'Найкращий день року')}</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>`}
     ${!show('bestm') ? '' : `<div class="card ${show('bestd') ? '' : 'span2'}"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>`}
   </div>` : ''}
-  <div class="card">
-    <div class="section-title"><h2>Продажі по місяцях</h2><span class="sub">${p.kind === 'all' ? 'весь час' : year}</span></div>
-    <div class="chart-box"><canvas id="cMonths"></canvas></div>
-  </div>
-  <div class="grid g3">
-    <div class="card span2"><div class="section-title"><h2>${p.kind === 'all' ? 'Ріст суми за весь час' : p.kind === 'year' ? 'Ріст суми за рік' : 'Ріст суми за місяць'}</h2><span class="sub">${p.kind === 'all' ? '' : p.kind === 'year' ? `${year} vs ${year - 1}` : `${lc(MONTHS[+p.ym.slice(5) - 1])} vs ${lc(MONTHS[+p.prev.start.slice(5, 7) - 1])}`}</span></div><div class="chart-box small"><canvas id="cRun"></canvas></div></div>
-    <div class="card span2-m"><div class="section-title"><h2>Акаунти</h2><span class="sub">${p.name}</span></div>
+  <div class="grid">
+    <div class="card span2"><div class="section-title"><h2>Акаунти</h2><span class="sub">${p.name}</span></div>
       ${sCur ? `<div class="chart-box small"><canvas id="cAcc"></canvas></div>` : ''}
       ${accs.map(a => `<a href="#acc:${a.id}" style="color:inherit;text-decoration:none"><div class="acc-row"><span class="dot" style="background:${a.c}"></span><span class="name">${esc(a.id)}<small>${a.n} речей${a.status === 'archive' ? ' · архів' : ''}</small></span><b>${money(a.s)}</b></div></a>`).join('')}
       <div class="acc-row"><span class="dot" style="background:transparent"></span><span class="name">Разом</span><b>${money(sCur)}</b></div>
@@ -499,7 +524,7 @@ function viewWork() {
   let body = '', lm = null;
   rows.forEach(x => {
     const m = ymOf(x.date);
-    if (p.kind !== 'month' && m !== lm) { body += sepRow(m, 3, hmShort(sum(inYM(cur, m), y => y.minutes)) + ' год'); lm = m; }
+    if (p.kind !== 'month' && m !== lm) { body += sepRow(m, 3, hmShort(sum(inYM(cur, m), y => y.minutes))); lm = m; }
     body += `<tr class="tap" data-id="${x.id}"><td>${dmy(x.date)} <span class="muted">${dowOf(x.date)}</span></td><td><b>${x.dayoff ? '—' : hmShort(x.minutes)}</b></td><td class="muted">${x.dayoff ? 'вихідний' : ''}</td></tr>${x.note ? `<tr class="tap" data-id="${x.id}"><td colspan="3" class="note">${esc(x.note)}</td></tr>` : ''}`;
   });
   $('#view').innerHTML = `
