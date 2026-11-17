@@ -152,6 +152,7 @@ function renderNav() {
     html += `<button class="nav-group ${open ? 'open' : ''}" data-owner="${esc(o)}">${ICONS.users}<span>${esc(o)}</span><small>${list.length}</small>${ICONS.chev}</button>
       <div class="nav-sub" ${open ? '' : 'hidden'}>${list.map(a => link('acc:' + a.id, 'user', a.id, a.status === 'archive' ? 'архів' : '')).join('')}</div>`;
   });
+  html += link('data', 'id', 'Дані');
   html += '<hr>' + link('expenses', 'wallet', 'Витрати') + link('work', 'clock', 'Час роботи');
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('.nav-group').forEach(b => b.onclick = () => {
@@ -267,7 +268,7 @@ const sepRow = (k, cols, extra) => `<tr class="sep"><td colspan="${cols}">${mont
 function render() {
   killCharts(); renderNav();
   const r = S.route, fab = $('#fab');
-  $('#monthWrap').hidden = r === 'settings';
+  $('#monthWrap').hidden = r === 'settings' || r === 'data';
   if (S.data) {
     const opts = monthOptions(), vals = opts.map(o => o.v);
     if (!S.month || !vals.includes(S.month)) S.month = vals.includes(store.get('vs_month')) ? store.get('vs_month') : ymOf(todayISO());
@@ -276,6 +277,7 @@ function render() {
   $('#pageStatus').textContent = ''; $('#pageStatus').className = 'status';
   fab.hidden = true;
   if (r === 'settings' || !S.data) return viewSettings();
+  if (r === 'data') return viewData();
   if (r.startsWith('acc:')) { fab.hidden = false; fab.onclick = () => saleForm(r.slice(4)); return viewAccount(r.slice(4)); }
   if (r === 'expenses') { fab.hidden = false; fab.onclick = () => expenseForm(); return viewExpenses(); }
   if (r === 'work') { fab.hidden = false; fab.onclick = () => workForm(); return viewWork(); }
@@ -294,10 +296,6 @@ function viewAccount(id) {
   setTitle(id);
   const st = $('#pageStatus'); st.textContent = acc.status === 'archive' ? '● Архів' : '● Активний'; st.className = 'status' + (acc.status === 'archive' ? ' archive' : '');
   const p = P(), all = sales(id), cur = forP(all, p);
-  const dataOpen = store.get('vs_data_open') !== '0';
-  const infoRow = (icon, label, v) => `<div class="info-row" ${v ? `data-copy="${esc(v)}"` : ''}>${ICONS[icon]}<span class="muted">${label}</span><b>${v ? esc(v) : '<span class="muted">не вказано</span>'}</b></div>`;
-  const dataCard = `<div class="card data-card"><div class="card-head"><button class="data-toggle ${dataOpen ? 'open' : ''}" id="dataToggle">${ICONS.id}<span>Дані</span>${ICONS.chev}</button><button class="mini-btn" id="dataEdit" aria-label="Змінити дані">${ICONS.pen}</button></div>
-    <div class="data-body" ${dataOpen ? '' : 'hidden'}>${infoRow('mail', 'Пошта', acc.email)}${infoRow('phone', 'Телефон', acc.phone)}</div></div>`;
   const S_ = (a, b) => sum(inRange(all, a, b), x => x.amount), I_ = (a, b) => sum(inRange(all, a, b), x => x.items);
   const A_ = (a, b) => { const i = I_(a, b); return i ? S_(a, b) / i : 0; };
   const sCur = sum(cur, x => x.amount), iCur = sum(cur, x => x.items), avg = iCur ? sCur / iCur : 0;
@@ -318,7 +316,7 @@ function viewAccount(id) {
   const sP = p.prev ? S_(p.prev.start, p.prev.end) : 0, sS = p.same ? S_(p.same.start, p.same.end) : 0;
   const dayCount = byDay(cur).length;
 
-  $('#view').innerHTML = `${dataCard}
+  $('#view').innerHTML = `
   <div class="grid ${show('avg') ? 'g3' : ''}">
     ${kpi('cal', perLabel(p, 'Продажі за місяць', 'Продажі за рік'), money(sCur), cmp(sCur, S_, p) + (p.kind === 'all' && firstDate ? `<div class="sub">з ${dmy(firstDate)}</div>` : ''), 'dark')}
     ${kpi('box', 'Кількість проданих речей', iCur, cmp(iCur, I_, p))}
@@ -340,8 +338,21 @@ function viewAccount(id) {
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
   if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
-  $('#dataToggle').onclick = () => { const b = $('.data-body'), open = b.hidden; b.hidden = !open; $('#dataToggle').classList.toggle('open', open); store.set('vs_data_open', open ? '1' : '0'); };
-  $('#dataEdit').onclick = () => accountDataForm(acc);
+}
+function viewData() {
+  setTitle('Дані');
+  const accs = S.data.accounts;
+  const owners = [...new Set(accs.map(a => a.owner || 'Інші'))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
+  const row = (icon, label, v) => `<div class="info-row" ${v ? `data-copy="${esc(v)}"` : ''}>${ICONS[icon]}<span class="muted">${label}</span><b>${v ? esc(v) : '<span class="muted">не вказано</span>'}</b></div>`;
+  $('#view').innerHTML = owners.map(o => `<div class="card">
+      <div class="section-title"><h2>${esc(o)}</h2><span class="sub">${accs.filter(a => (a.owner || 'Інші') === o).length} акаунт.</span></div>
+      ${accs.filter(a => (a.owner || 'Інші') === o).map(a => `<div class="acc-data">
+        <div class="card-head"><a class="acc-name" href="#acc:${a.id}">${ICONS.user}<span>${esc(a.id)}</span>${a.status === 'archive' ? '<span class="tag-mini">архів</span>' : ''}</a>
+        <button class="mini-btn" data-edit="${a.id}" aria-label="Змінити дані ${esc(a.id)}">${ICONS.pen}</button></div>
+        ${row('mail', 'Пошта', a.email)}${row('phone', 'Телефон', a.phone)}
+      </div>`).join('')}
+    </div>`).join('') + '<div class="sub" style="text-align:center">Натисніть на пошту чи телефон, щоб скопіювати</div>';
+  $('#view').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => accountDataForm(accs.find(a => a.id === b.dataset.edit)));
   $('#view').querySelectorAll('[data-copy]').forEach(r => r.onclick = async () => { try { await navigator.clipboard.writeText(r.dataset.copy); toast('Скопійовано'); } catch (e) { toast(r.dataset.copy); } });
 }
 function accountDataForm(acc) {
