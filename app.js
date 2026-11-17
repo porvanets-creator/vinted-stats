@@ -4,7 +4,7 @@ const GH = { owner: 'porvanets-creator', repo: 'vinted-stats-data', path: 'data.
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
 const MONTHS_SHORT = ['Січ','Лют','Бер','Кві','Тра','Чер','Лип','Сер','Вер','Жов','Лис','Гру'];
 const DOW = ['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
-const CATS = ['Закупка (секонд)','Пакування','Пошта','Інше'];
+const CATS = ['Закупка (секонд)','Просування Vinted','Пакування','Пошта','Інше'];
 const ACC_COLORS = ['#262626','#7a7a7a','#b0b0b0','#4f6d5c','#c9c9c9'];
 
 const ICONS = {
@@ -264,7 +264,7 @@ function viewAccount(id) {
   [...sorted].reverse().forEach(s => {
     const m = ymOf(s.date);
     if (p.kind === 'year' && m !== lm) { rowsHtml += sepRow(m, 3, money(mTot[m])); lm = m; }
-    rowsHtml += `<tr class="tap" data-id="${s.id}"><td>${dmy(s.date)} <span class="muted">${dowOf(s.date)}</span></td><td>${s.items}</td><td><b>${money(s.amount)}</b><div class="sub">${money(runMap[s.id])}</div></td></tr>`;
+    rowsHtml += `<tr class="tap" data-id="${s.id}"><td>${dmy(s.date)} <span class="muted">${dowOf(s.date)}</span></td><td>${s.items}</td><td><b>${money(s.amount)}</b><div class="sub">${money(runMap[s.id])}</div></td></tr>${prodLine(s)}`;
   });
   const sP = S_(p.prev.start, p.prev.end), sS = p.same ? S_(p.same.start, p.same.end) : 0;
 
@@ -393,21 +393,23 @@ function viewExpenses() {
   setTitle('Витрати');
   const st = $('#pageStatus'); st.textContent = 'спільні для всіх акаунтів'; st.className = 'status archive';
   const p = P(), ex = S.data.expenses, cur = forP(ex, p);
-  const E_ = (a, b) => sum(inRange(ex, a, b), e => e.amount), N_ = (a, b) => inRange(ex, a, b).length;
+  const isBuy = e => e.category === 'Закупка (секонд)';
+  const E_ = (a, b) => sum(inRange(ex, a, b), e => e.amount), N_ = (a, b) => inRange(ex, a, b).filter(isBuy).length;
+  const buys = cur.filter(isBuy), sBuys = sum(buys, e => e.amount);
   const sCur = sum(cur, e => e.amount);
   const rows = [...cur].sort((a, b) => b.date.localeCompare(a.date));
   let body = '', lm = null;
   rows.forEach(e => {
     const m = ymOf(e.date);
     if (p.kind === 'year' && m !== lm) { body += sepRow(m, 3, money(sum(inYM(cur, m), x => x.amount))); lm = m; }
-    body += `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${dowOf(e.date)}</span></td><td class="muted">${esc(e.category)}</td><td><b>${money(e.amount)}</b></td></tr>${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`;
+    body += `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${dowOf(e.date)}</span></td><td class="muted">${esc(e.category)}</td><td><b>${money(e.amount)}</b></td></tr>${e.desc ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="desc">${esc(e.desc)}</td></tr>` : ''}${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`;
   });
   $('#view').innerHTML = `
   <div class="grid g4">
     ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(sCur), cmp(sCur, E_, p, true), 'dark')}
     ${kpi('chart', 'Витрати за весь час', money(sum(ex, e => e.amount)))}
-    ${kpi('box', perLabel(p, 'Закупок за місяць', 'Закупок за рік'), cur.length, cmp(cur.length, N_, p, true))}
-    ${kpi('star', 'Середньо за закупку', money(cur.length ? sCur / cur.length : 0))}
+    ${kpi('box', perLabel(p, 'Закупок за місяць', 'Закупок за рік'), buys.length, cmp(buys.length, N_, p, true) + '<div class="sub">тільки секонд</div>')}
+    ${kpi('star', 'Середньо за закупку', money(buys.length ? sBuys / buys.length : 0), '<div class="sub">тільки секонд</div>')}
   </div>
   <div class="card">
     <div class="section-title"><h2>Записи</h2><span class="sub">${p.name}</span></div>
@@ -493,12 +495,22 @@ function closeSheet() { $('#sheetWrap').hidden = true; }
 $('#sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') closeSheet(); });
 const num = v => { const n = parseFloat(String(v).replace(',', '.').replace(/\s/g, '')); return isFinite(n) ? n : NaN; };
 
+function prodLine(s) {
+  if (!s.products || !s.products.length) return '';
+  return `<tr class="tap prod" data-id="${s.id}"><td colspan="3" class="prods"><div>${s.products.map(p => esc(p.name)).join(' · ')}</div></td></tr>`;
+}
+function prodList(s) {
+  if (!s || !s.products || !s.products.length) return '';
+  return `<div class="plist"><div class="sub" style="margin-bottom:6px">Що продано (${s.products.length})</div>${s.products.map(p => `<div class="pitem"><span>${esc(p.name)}${p.shipped ? ' <span class="tag-mini">в дорозі</span>' : ''}${p.note ? `<small class="down">${esc(p.note)}</small>` : ''}</span>${p.price != null ? `<b>${money(p.price)}</b>` : ''}</div>`).join('')}</div>`;
+}
 function saleForm(acc, s) {
   const edit = !!s;
   openSheet(`<h3>${edit ? 'Редагувати продаж' : 'Новий продаж'} · ${esc(acc)}</h3>
     <label class="field"><span>Дата</span><input id="fDate" type="date" value="${s ? s.date : todayISO()}"></label>
+    ${prodList(s)}
     <div class="row2"><label class="field"><span>Кількість речей</span><input id="fItems" type="number" inputmode="numeric" min="0" step="1" value="${s ? s.items : ''}" placeholder="1"></label>
     <label class="field"><span>Сума, zł</span><input id="fAmt" type="text" inputmode="decimal" value="${s ? String(s.amount).replace('.', ',') : ''}" placeholder="0,00"></label></div>
+    ${s && s.products && s.products.some(p => p.price != null) ? '' : `<label class="field"><span>Що продано (необов'язково, кожна річ з нового рядка)</span><textarea id="fNames" rows="3" placeholder="Bluza Nike M&#10;Koszula Ralph Lauren L">${s && s.products ? esc(s.products.map(p => p.name).join('\n')) : ''}</textarea></label>`}
     <button class="btn" id="ok">${edit ? 'Зберегти зміни' : 'Додати продаж'}</button>
     ${edit ? '<button class="btn danger" id="del">Видалити запис</button>' : ''}
     <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
@@ -507,9 +519,11 @@ function saleForm(acc, s) {
     el.querySelector('#ok').onclick = async () => {
       const date = el.querySelector('#fDate').value, items = parseInt(el.querySelector('#fItems').value, 10), amount = r2(num(el.querySelector('#fAmt').value));
       if (!date) return toast('Вкажіть дату'); if (!(items >= 0)) return toast('Вкажіть кількість речей'); if (!(amount >= 0)) return toast('Вкажіть суму');
+      const ta = el.querySelector('#fNames'), names = ta ? ta.value.split('\n').map(x => x.trim()).filter(Boolean) : null;
+      const extra = names && names.length ? { products: names.map(name => ({ name })) } : {};
       closeSheet();
-      if (edit) await save(`Змінено продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł (було ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł)`, d => Object.assign(d.sales.find(x => x.id === s.id), { date, items, amount }));
-      else await save(`Продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł`, d => d.sales.push({ id: uid('s'), account: acc, date, items, amount }));
+      if (edit) await save(`Змінено продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł (було ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł)`, d => Object.assign(d.sales.find(x => x.id === s.id), { date, items, amount }, extra));
+      else await save(`Продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł`, d => d.sales.push({ id: uid('s'), account: acc, date, items, amount, ...extra }));
       focusDate(date); render();
     };
     if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити продаж ${dmy(s.date)} на ${money(s.amount)}?`)) return; closeSheet(); await save(`Видалено продаж ${acc} ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł`, d => { d.sales = d.sales.filter(x => x.id !== s.id); }); };

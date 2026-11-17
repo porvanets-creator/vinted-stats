@@ -161,3 +161,14 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .opt b{display:block;font-size:15px}
 .opt small{color:var(--muted);font-size:12.5px}
 .card.dark .mini-btn{background:rgba(127,127,127,.25);color:var(--dark-ink)}
+.table tr.tap:has(+ tr.prod) td{border-bottom:0;padding-bottom:4px}
+.table td.prods{white-space:normal;text-align:left;font-size:12px;color:var(--muted);padding-top:0;line-height:1.35}
+.table td.prods div{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.table td.desc{white-space:normal;text-align:left;font-size:12px;color:var(--muted);padding-top:0}
+.table tr.tap:has(+ tr.tap td.desc) td,.table tr.tap:has(+ tr.tap td.note) td{border-bottom:0;padding-bottom:4px}
+.plist{background:var(--soft);border-radius:14px;padding:10px 12px;margin-bottom:12px;max-height:240px;overflow-y:auto}
+.pitem{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.pitem:last-child{border:0}
+.pitem small{display:block;font-size:11.5px}
+.pitem b{white-space:nowrap}
+.tag-mini{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:0 5px;white-space:nowrap}
