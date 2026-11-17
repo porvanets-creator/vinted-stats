@@ -5,7 +5,7 @@ const MONTHS = ['Січень','Лютий','Березень','Квітень',
 const MONTHS_SHORT = ['Січ','Лют','Бер','Кві','Тра','Чер','Лип','Сер','Вер','Жов','Лис','Гру'];
 const DOW = ['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
 const CATS = ['Закупка (секонд)','Закупка (Vinted)','Просування Vinted','Пакування','Пошта','Інше'];
-const ACC_COLORS = ['#262626','#7a7a7a','#b0b0b0','#4f6d5c','#c9c9c9'];
+const ACC_COLORS = ['#262626','#7a7a7a','#b0b0b0','#4f6d5c','#c9c9c9','#8a6d4f'];
 
 const ICONS = {
   home:'<svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>',
@@ -30,6 +30,8 @@ const ICONS = {
   phone:'<svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
   pen:'<svg viewBox="0 0 24 24"><path d="M4 20l4-1 10.5-10.5a2.1 2.1 0 0 0-3-3L5 16z"/><path d="M14 7l3 3"/></svg>',
   bag:'<svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>',
+  globe:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.7 5.4 3.7 8.5s-1.2 5.9-3.7 8.5c-2.5-2.6-3.7-5.4-3.7-8.5S9.5 6.1 12 3.5z"/></svg>',
+  bank:'<svg viewBox="0 0 24 24"><path d="M3 9.5L12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/></svg>',
   coin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/></svg>'
 };
 
@@ -145,18 +147,24 @@ const OWNER_ORDER = ['Роман', 'Влад', 'Марія'];
 function renderNav() {
   const link = (id, icon, label, tag) => `<a href="#${id}" class="${S.route === id ? 'active' : ''}">${ICONS[icon]}<span>${esc(label)}</span>${tag ? `<span class="tag">${tag}</span>` : ''}</a>`;
   const accs = S.data ? S.data.accounts : [];
-  const owners = [...new Set(accs.map(a => a.owner || 'Інші'))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
+  const vAccs = accs.filter(a => (a.platform || 'vinted') === 'vinted'), eAccs = accs.filter(a => a.platform === 'ebay');
+  const owners = [...new Set(vAccs.map(a => a.owner || 'Інші'))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
   let html = link('panel', 'home', 'Головна'), inner = '';
   owners.forEach(o => {
-    const list = accs.filter(a => (a.owner || 'Інші') === o);
+    const list = vAccs.filter(a => (a.owner || 'Інші') === o);
     const open = store.get('vs_grp_' + o) === '1' || list.some(a => S.route === 'acc:' + a.id);
     inner += `<button class="nav-group ${open ? 'open' : ''}" data-owner="${esc(o)}">${ICONS.users}<span>${esc(o)}</span><small>${list.length}</small>${ICONS.chev}</button>
       <div class="nav-sub" ${open ? '' : 'hidden'}>${list.map(a => link('acc:' + a.id, 'user', a.id, a.status === 'archive' ? 'архів' : '')).join('')}</div>`;
   });
-  inner += link('data', 'id', 'Дані');
-  const vOpen = store.get('vs_grp_Vinted') !== '0' || S.route.startsWith('acc:') || S.route === 'data';
-  html += `<button class="nav-group top ${vOpen ? 'open' : ''}" data-owner="Vinted">${ICONS.bag}<span>Vinted</span><small>${accs.length}</small>${ICONS.chev}</button>
+  const vOpen = store.get('vs_grp_Vinted') !== '0' || vAccs.some(a => S.route === 'acc:' + a.id);
+  html += `<button class="nav-group top ${vOpen ? 'open' : ''}" data-owner="Vinted">${ICONS.bag}<span>Vinted</span><small>${vAccs.length}</small>${ICONS.chev}</button>
     <div class="nav-sub" ${vOpen ? '' : 'hidden'}>${inner}</div>`;
+  if (eAccs.length) {
+    const eOpen = store.get('vs_grp_eBay') === '1' || eAccs.some(a => S.route === 'acc:' + a.id);
+    html += `<button class="nav-group top ${eOpen ? 'open' : ''}" data-owner="eBay">${ICONS.globe}<span>eBay</span><small>${eAccs.length}</small>${ICONS.chev}</button>
+      <div class="nav-sub" ${eOpen ? '' : 'hidden'}>${eAccs.map(a => link('acc:' + a.id, 'user', a.id, a.status === 'archive' ? 'архів' : '')).join('')}</div>`;
+  }
+  html += link('data', 'id', 'Дані');
   html += '<hr>' + link('expenses', 'wallet', 'Витрати') + link('work', 'clock', 'Час роботи');
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('.nav-group').forEach(b => b.onclick = () => {
@@ -345,15 +353,15 @@ function viewAccount(id) {
 }
 function viewData() {
   setTitle('Дані');
-  const accs = S.data.accounts;
+  const accs = S.data.accounts.filter(a => a.status !== 'archive');
   const owners = [...new Set(accs.map(a => a.owner || 'Інші'))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
   const row = (icon, label, v) => `<div class="info-row" ${v ? `data-copy="${esc(v)}"` : ''}>${ICONS[icon]}<span class="muted">${label}</span><b>${v ? esc(v) : '<span class="muted">не вказано</span>'}</b></div>`;
   $('#view').innerHTML = owners.map(o => `<div class="card">
       <div class="section-title"><h2>${esc(o)}</h2><span class="sub">${accs.filter(a => (a.owner || 'Інші') === o).length} акаунт.</span></div>
       ${accs.filter(a => (a.owner || 'Інші') === o).map(a => `<div class="acc-data">
-        <div class="card-head"><a class="acc-name" href="#acc:${a.id}">${ICONS.user}<span>${esc(a.id)}</span>${a.status === 'archive' ? '<span class="tag-mini">архів</span>' : ''}</a>
+        <div class="card-head"><a class="acc-name" href="#acc:${a.id}">${ICONS.user}<span>${esc(a.id)}</span>${a.platform === 'ebay' ? '<span class="tag-mini">eBay</span>' : '<span class="tag-mini">Vinted</span>'}</a>
         <button class="mini-btn" data-edit="${a.id}" aria-label="Змінити дані ${esc(a.id)}">${ICONS.pen}</button></div>
-        ${row('mail', 'Пошта', a.email)}${row('phone', 'Телефон', a.phone)}
+        ${row('mail', 'Пошта', a.email)}${row('phone', 'Телефон', a.phone)}${row('bank', 'Рахунок', a.bank)}
       </div>`).join('')}
     </div>`).join('') + '<div class="sub" style="text-align:center">Натисніть на пошту чи телефон, щоб скопіювати</div>';
   $('#view').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => accountDataForm(accs.find(a => a.id === b.dataset.edit)));
@@ -363,13 +371,14 @@ function accountDataForm(acc) {
   openSheet(`<h3>Дані · ${esc(acc.id)}</h3>
     <label class="field"><span>Пошта</span><input id="fMail" type="email" autocomplete="off" value="${esc(acc.email || '')}" placeholder="name@gmail.com"></label>
     <label class="field"><span>Телефон</span><input id="fPhone" type="tel" autocomplete="off" value="${esc(acc.phone || '')}" placeholder="+48 …"></label>
+    <label class="field"><span>Банківський рахунок</span><input id="fBank" type="text" inputmode="text" autocomplete="off" value="${esc(acc.bank || '')}" placeholder="PL.. .... .... ...."></label>
     <button class="btn" id="ok">Зберегти</button>
     <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
     el.querySelector('#cancel').onclick = closeSheet;
     el.querySelector('#ok').onclick = async () => {
-      const email = el.querySelector('#fMail').value.trim(), phone = el.querySelector('#fPhone').value.trim();
+      const email = el.querySelector('#fMail').value.trim(), phone = el.querySelector('#fPhone').value.trim(), bank = el.querySelector('#fBank').value.trim();
       closeSheet();
-      await save(`Дані акаунта ${acc.id}`, d => Object.assign(d.accounts.find(a => a.id === acc.id), { email, phone }));
+      await save(`Дані акаунта ${acc.id}`, d => Object.assign(d.accounts.find(a => a.id === acc.id), { email, phone, bank }));
     };
   });
 }
