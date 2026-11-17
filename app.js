@@ -136,7 +136,9 @@ function routes() {
 }
 function renderNav() {
   $('#nav').innerHTML = routes().map(r => r ? `<a href="#${r.id}" class="${S.route === r.id ? 'active' : ''}">${ICONS[r.icon]}<span>${esc(r.label)}</span>${r.tag ? `<span class="tag">${r.tag}</span>` : ''}</a>` : '<hr>').join('');
-  $('#navFoot').innerHTML = `<a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
+  $('#navFoot').innerHTML = `<button class="nav-switch" id="cmpToggle" aria-pressed="${!cmpOff()}">${ICONS.swap}<span>Порівняння</span><i class="sw ${cmpOff() ? '' : 'on'}"></i></button>
+    <a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
+  $('#cmpToggle').onclick = () => { store.set('vs_cmp_off', cmpOff() ? '0' : '1'); toast(cmpOff() ? 'Порівняння приховано' : 'Порівняння показано'); render(); };
 }
 function openDrawer(v) { $('#drawer').classList.toggle('open', v); $('#scrim').classList.toggle('show', v); }
 $('#menuBtn').onclick = () => openDrawer(true);
@@ -202,7 +204,7 @@ function cmpLine(cur, prev, label, invert) {
 }
 // f(start,end) → number; shows "same period" line (if period is ongoing) + "whole previous period" line
 function cmp(cur, f, p, invert) {
-  if (!p.prev) return '';
+  if (!p.prev || cmpOff()) return '';
   if (!f(p.prev.start, p.prev.end)) return `<div class="cmps"><div class="cmp"><span class="chg flat">—</span><span class="sub">немає даних за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} для порівняння</span></div></div>`;
   let h = '';
   const mode = cmpMode();
@@ -286,7 +288,7 @@ function viewAccount(id) {
     ${kpi('star', 'Середній чек', money(avg), cmp(avg, A_, p))}
   </div>
   <div class="grid g3">
-    ${!p.prev ? '' : `<div class="card span2-m"><div class="card-head"><div class="label">${ICONS.swap}${p.cmpTitle}</div>${p.same ? `<button class="mini-btn" id="cmpMode" aria-label="Що показувати">${ICONS.plus}</button>` : ''}</div>
+    ${!p.prev || cmpOff() ? '' : `<div class="card span2-m"><div class="card-head"><div class="label">${ICONS.swap}${p.cmpTitle}</div>${p.same ? `<button class="mini-btn" id="cmpMode" aria-label="Що показувати">${ICONS.plus}</button>` : ''}</div>
       ${!sP ? `<div class="mid flat">немає даних</div><div class="sub">за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} продажів не записано</div>` : `
       ${p.same && cmpMode() !== 'whole' ? diffBlock(sCur, sS, `За той самий час (${p.sameLabel})`, `${p.sameLabel}: ${money(sS)}`) : ''}
       ${!p.same || cmpMode() !== 'same' ? diffBlock(sCur, sP, p.same ? `За ${p.wholeLabel}` : `Проти: ${p.prevName}`, `${p.prevName}: ${money(sP)}`) : ''}`}
@@ -302,6 +304,7 @@ function viewAccount(id) {
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
   if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
 }
+const cmpOff = () => store.get('vs_cmp_off') === '1';
 const cmpMode = () => ['same', 'whole', 'both'].includes(store.get('vs_cmpmode')) ? store.get('vs_cmpmode') : 'both';
 function cmpModeSheet(p) {
   const cur = cmpMode();
@@ -350,7 +353,7 @@ function viewPanel() {
 
   $('#view').innerHTML = `
   <div class="grid g3">
-    <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div></div>
+    <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same && !cmpOff() ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div></div>
     ${p.kind === 'all' ? kpi('chart', `Продажі за ${thisYear} рік`, money(sum(yearSales, x => x.amount)), `<div class="sub">${sum(yearSales, x => x.items)} речей · усі акаунти</div>`)
       : kpi('chart', 'Продажі за весь час', money(sum(all, x => x.amount)), `<div class="sub">${sum(all, x => x.items)} речей · усі акаунти</div>`)}
     ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(eCur), cmp(eCur, E_, p, true))}
@@ -379,8 +382,8 @@ function viewPanel() {
   </div>
   <div class="card">
     <div class="section-title"><h2>Підсумок по місяцях</h2><span class="sub">${p.kind === 'all' ? 'весь час' : year}</span></div>
-    <div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Речей</th><th>Продажі</th><th>Витрати</th><th>Прибуток</th><th>Години</th><th>Δ</th></tr></thead><tbody>
-    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const pr = mrows.find(x => x.k === shiftYM(m.k, -1)); const ps = pr ? pr.s : 0; return `<tr><td>${p.kind === 'all' ? monthName(m.k) : MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td><td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
+    <div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Речей</th><th>Продажі</th><th>Витрати</th><th>Прибуток</th><th>Години</th>${cmpOff() ? '' : '<th>Δ</th>'}</tr></thead><tbody>
+    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const pr = mrows.find(x => x.k === shiftYM(m.k, -1)); const ps = pr ? pr.s : 0; return `<tr><td>${p.kind === 'all' ? monthName(m.k) : MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td>${cmpOff() ? '' : `<td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}</td>`}</tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
     </tbody></table></div>
   </div>`;
 

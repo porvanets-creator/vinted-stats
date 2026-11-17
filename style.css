@@ -172,3 +172,10 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .pitem small{display:block;font-size:11.5px}
 .pitem b{white-space:nowrap}
 .tag-mini{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:0 5px;white-space:nowrap}
+
+.nav-switch{width:100%;display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;border:0;background:transparent;color:var(--side-ink);font-size:15px;cursor:pointer;margin-bottom:2px;text-align:left}
+.nav-switch span{flex:1}
+.sw{width:38px;height:22px;border-radius:99px;background:#4a4a4a;position:relative;flex:none;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#bdbdbd;transition:transform .2s,background .2s}
+.sw.on{background:#2e7d4f}
+.sw.on::after{transform:translateX(16px);background:#fff}
