@@ -348,6 +348,16 @@ function viewAccount(id) {
     ${sorted.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Речей</th><th>Сума<br><span style="font-weight:400">наростаючим за місяць</span></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
       : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : `За ${perWord(p)} ще немає продажів.<br>Натисніть «+», щоб додати.`}</div>`}
   </div>`;
+  if (acc.platform === 'ebay') {
+    const promoE = forP(S.data.expenses, p).filter(e => e.account === id && e.category === 'Просування eBay');
+    const netPln = r2(sCur - sum(promoE, e => e.amount));
+    const eurIn = sum(cur, x => x.eur || 0), eurOut = sum(promoE, e => e.eur || 0), hasEur = cur.some(x => x.eur != null);
+    const firstGrid = $('#view .grid');
+    firstGrid.insertAdjacentHTML('afterend', `<div class="card"><div class="label">${ICONS.coin}Сума чистими / оподатковувана</div>
+      <div class="big">${money(netPln)}</div>
+      ${hasEur ? `<div class="sub">${nf2.format(r2(eurIn - eurOut))} € на рахунку eBay</div>` : ''}
+      <div class="sub" style="margin-top:6px">Продажі після комісії eBay (${money(sCur)}) мінус просування eBay (${money(sum(promoE, e => e.amount))}). Перераховано за курсом НБП.</div></div>`);
+  }
   const pays = (S.data.payouts || []).filter(x => x.account === id && x.date >= p.start && x.date <= p.end).sort((a, b) => b.date.localeCompare(a.date));
   if (pays.length) $('#view').insertAdjacentHTML('beforeend', `<div class="card"><div class="section-title"><h2>Виплати на банк</h2><span class="sub">${p.name}</span></div>
     <div class="list-days">${pays.map(x => `<div><span>${dmy(x.date)} <span class="muted">· ${esc(x.bank || '')}</span></span><b>${nf2.format(x.amount)} ${x.currency === 'EUR' ? '€' : esc(x.currency || '')}</b></div>`).join('')}</div>
