@@ -210,3 +210,6 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .acc-name{display:flex;align-items:center;gap:8px;color:var(--ink);text-decoration:none;font-weight:600;font-size:15px;padding:4px 0}
 .acc-name svg{width:18px;height:18px;color:var(--muted)}
 .acc-data .info-row:first-of-type{border-top:0}
+
+.nav-sub .nav-group{font-size:14.5px;padding:9px 10px}
+.nav-sub .nav-sub{margin-left:12px}

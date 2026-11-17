@@ -29,6 +29,7 @@ const ICONS = {
   mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>',
   phone:'<svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
   pen:'<svg viewBox="0 0 24 24"><path d="M4 20l4-1 10.5-10.5a2.1 2.1 0 0 0-3-3L5 16z"/><path d="M14 7l3 3"/></svg>',
+  bag:'<svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>',
   coin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/></svg>'
 };
 
@@ -145,14 +146,17 @@ function renderNav() {
   const link = (id, icon, label, tag) => `<a href="#${id}" class="${S.route === id ? 'active' : ''}">${ICONS[icon]}<span>${esc(label)}</span>${tag ? `<span class="tag">${tag}</span>` : ''}</a>`;
   const accs = S.data ? S.data.accounts : [];
   const owners = [...new Set(accs.map(a => a.owner || 'Інші'))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
-  let html = link('panel', 'home', 'Головна');
+  let html = link('panel', 'home', 'Головна'), inner = '';
   owners.forEach(o => {
     const list = accs.filter(a => (a.owner || 'Інші') === o);
     const open = store.get('vs_grp_' + o) === '1' || list.some(a => S.route === 'acc:' + a.id);
-    html += `<button class="nav-group ${open ? 'open' : ''}" data-owner="${esc(o)}">${ICONS.users}<span>${esc(o)}</span><small>${list.length}</small>${ICONS.chev}</button>
+    inner += `<button class="nav-group ${open ? 'open' : ''}" data-owner="${esc(o)}">${ICONS.users}<span>${esc(o)}</span><small>${list.length}</small>${ICONS.chev}</button>
       <div class="nav-sub" ${open ? '' : 'hidden'}>${list.map(a => link('acc:' + a.id, 'user', a.id, a.status === 'archive' ? 'архів' : '')).join('')}</div>`;
   });
-  html += link('data', 'id', 'Дані');
+  inner += link('data', 'id', 'Дані');
+  const vOpen = store.get('vs_grp_Vinted') !== '0' || S.route.startsWith('acc:') || S.route === 'data';
+  html += `<button class="nav-group top ${vOpen ? 'open' : ''}" data-owner="Vinted">${ICONS.bag}<span>Vinted</span><small>${accs.length}</small>${ICONS.chev}</button>
+    <div class="nav-sub" ${vOpen ? '' : 'hidden'}>${inner}</div>`;
   html += '<hr>' + link('expenses', 'wallet', 'Витрати') + link('work', 'clock', 'Час роботи');
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('.nav-group').forEach(b => b.onclick = () => {
@@ -283,7 +287,7 @@ function render() {
   if (r === 'work') { fab.hidden = false; fab.onclick = () => workForm(); return viewWork(); }
   return viewPanel();
 }
-function setTitle(t) { $('#pageTitle').textContent = t; document.title = `${t} · Vinted`; }
+function setTitle(t) { $('#pageTitle').textContent = t; document.title = `${t} · Sell Analytics`; }
 function kpi(icon, label, value, extra = '', cls = '') {
   return `<div class="card ${cls}"><div class="label">${ICONS[icon]}${label}</div><div class="big">${value}</div>${extra}</div>`;
 }
