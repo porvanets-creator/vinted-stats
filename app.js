@@ -1,0 +1,471 @@
+'use strict';
+/* ===== config ===== */
+const GH = { owner: 'porvanets-creator', repo: 'vinted-stats-data', path: 'data.json', branch: 'main' };
+const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+const MONTHS_SHORT = ['Січ','Лют','Бер','Кві','Тра','Чер','Лип','Сер','Вер','Жов','Лис','Гру'];
+const DOW = ['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
+const CATS = ['Закупка (секонд)','Пакування','Пошта','Інше'];
+const ACC_COLORS = ['#262626','#7a7a7a','#b0b0b0','#4f6d5c','#c9c9c9'];
+
+const ICONS = {
+  home:'<svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>',
+  user:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
+  wallet:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M16 13h2M3 10h18M6 6l9-3 1 3"/></svg>',
+  clock:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  gear:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.2 6.5l2.6 1.5M17.2 16l2.6 1.5M4.2 17.5l2.6-1.5M17.2 8l2.6-1.5"/></svg>',
+  chart:'<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  cal:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>',
+  box:'<svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>',
+  star:'<svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>',
+  trophy:'<svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8"/></svg>',
+  target:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>',
+  trend:'<svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>',
+  swap:'<svg viewBox="0 0 24 24"><path d="M7 7h13l-4-4M17 17H4l4 4"/></svg>',
+  coin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/></svg>'
+};
+
+/* ===== state ===== */
+const S = { data: null, sha: null, route: 'panel', month: null, saving: false, charts: [] };
+const $ = s => document.querySelector(s);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+
+/* ===== helpers ===== */
+const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const nf2 = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = n => nf2.format(r2(n || 0)) + ' zł';
+const moneyShort = n => Math.abs(n) >= 1000 ? (n / 1000).toLocaleString('uk-UA', { maximumFractionDigits: 1 }) + 'k' : String(Math.round(n));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ymOf = d => d.slice(0, 7);
+const dmy = d => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
+const monthName = ym => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
+const shiftYM = (ym, k) => { let y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + k; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return `${y}-${String(m + 1).padStart(2, '0')}`; };
+const daysIn = ym => new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
+const todayISO = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+const hm = min => { if (min == null) return '—'; const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h} год ${String(m).padStart(2, '0')} хв`; };
+const hmShort = min => { if (!min) return '0:00'; const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h}:${String(m).padStart(2, '0')}`; };
+const sum = (arr, f) => r2(arr.reduce((a, x) => a + (+f(x) || 0), 0));
+const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function pct(cur, prev) {
+  if (!prev) return '<span class="chg flat">— немає даних для порівняння</span>';
+  const p = cur / prev - 1, v = Math.round(p * 100);
+  if (v === 0) return '<span class="chg flat">→ 0%</span>';
+  return `<span class="chg ${v > 0 ? 'up' : 'down'}">${v > 0 ? '↑ +' : '↓ −'}${Math.abs(v)}%</span>`;
+}
+function diffHtml(cur, prev) {
+  if (!prev) return '<div class="mid flat">немає даних</div>';
+  const d = r2(cur - prev);
+  return `<div class="mid ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : d < 0 ? '−' : ''}${money(Math.abs(d))}</div>`;
+}
+function toast(msg, ms = 2200) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), ms); }
+
+/* ===== data access ===== */
+const sales = acc => S.data.sales.filter(s => !acc || s.account === acc);
+const inYM = (arr, ym) => arr.filter(x => ymOf(x.date) === ym);
+const inRange = (arr, a, b) => arr.filter(x => x.date >= a && x.date <= b);
+function byDay(arr) { const m = {}; arr.forEach(s => { m[s.date] = r2((m[s.date] || 0) + s.amount); }); return Object.entries(m).map(([date, amount]) => ({ date, amount })); }
+function byMonth(arr) { const m = {}; arr.forEach(s => { const k = ymOf(s.date); m[k] = r2((m[k] || 0) + s.amount); }); return m; }
+function ytd(arr, ym) { const y = ym.slice(0, 4); return sum(inRange(arr, `${y}-01-01`, `${ym}-31`), s => s.amount); }
+function ytdPrev(arr, ym) { const y = +ym.slice(0, 4) - 1; return sum(inRange(arr, `${y}-01-01`, `${y}${ym.slice(4)}-31`), s => s.amount); }
+function monthsAvailable() {
+  const set = new Set([ymOf(todayISO())]);
+  ['sales', 'expenses', 'work'].forEach(k => S.data[k].forEach(x => set.add(ymOf(x.date))));
+  const list = [...set].sort();
+  const first = list[0], last = list[list.length - 1], out = [];
+  for (let ym = first; ym <= last; ym = shiftYM(ym, 1)) out.push(ym);
+  return out.reverse();
+}
+
+/* ===== GitHub storage ===== */
+const b64enc = s => { const bytes = new TextEncoder().encode(s); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+const b64dec = b => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\n/g, '')), c => c.charCodeAt(0)));
+const ghUrl = () => `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+const ghHeaders = () => ({ Authorization: `Bearer ${store.get('vs_token')}`, Accept: 'application/vnd.github+json' });
+
+async function load() {
+  const token = store.get('vs_token');
+  if (token) {
+    const r = await fetch(`${ghUrl()}?ref=${GH.branch}&t=${Date.now()}`, { headers: ghHeaders(), cache: 'no-store' });
+    if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error('token');
+    if (!r.ok) throw new Error('net');
+    const j = await r.json();
+    S.sha = j.sha; S.data = JSON.parse(b64dec(j.content)); S.mode = 'github';
+    store.set('vs_cache', JSON.stringify(S.data));
+    return;
+  }
+  if (isLocal) {
+    const r = await fetch('data.local.json', { cache: 'no-store' });
+    if (r.ok) { S.data = await r.json(); S.mode = 'local'; return; }
+  }
+  throw new Error('token');
+}
+
+async function save(message, mutate) {
+  if (S.saving) return false;
+  const backup = JSON.stringify(S.data);
+  mutate(S.data);
+  if (S.mode === 'offline') { S.data = JSON.parse(backup); toast('Немає інтернету — зберегти не вийде. Спробуйте пізніше.', 4000); return false; }
+  if (S.mode !== 'github') { toast('Тестовий режим: зміни не зберігаються'); render(); return true; }
+  S.saving = true; toast('Зберігаю…', 10000);
+  try {
+    const body = { message, content: b64enc(JSON.stringify(S.data, null, 1)), sha: S.sha, branch: GH.branch };
+    const r = await fetch(ghUrl(), { method: 'PUT', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.status === 409 || r.status === 422) { S.data = JSON.parse(backup); await load(); render(); toast('Дані змінились на іншому пристрої. Оновив — повторіть, будь ласка.', 4000); return false; }
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json(); S.sha = j.content.sha;
+    store.set('vs_cache', JSON.stringify(S.data));
+    toast('Збережено ✓'); render(); return true;
+  } catch (e) {
+    S.data = JSON.parse(backup); render();
+    toast('Не вдалося зберегти. Перевірте інтернет і спробуйте ще раз.', 4000); return false;
+  } finally { S.saving = false; }
+}
+
+/* ===== nav ===== */
+function routes() {
+  const acc = S.data ? S.data.accounts : [];
+  return [{ id: 'panel', label: 'Панель', icon: 'home' }]
+    .concat(acc.map(a => ({ id: 'acc:' + a.id, label: a.id, icon: 'user', tag: a.status === 'archive' ? 'архів' : '' })))
+    .concat([null, { id: 'expenses', label: 'Витрати', icon: 'wallet' }, { id: 'work', label: 'Час роботи', icon: 'clock' }]);
+}
+function renderNav() {
+  $('#nav').innerHTML = routes().map(r => r ? `<a href="#${r.id}" class="${S.route === r.id ? 'active' : ''}">${ICONS[r.icon]}<span>${esc(r.label)}</span>${r.tag ? `<span class="tag">${r.tag}</span>` : ''}</a>` : '<hr>').join('');
+  $('#navFoot').innerHTML = `<a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
+}
+function openDrawer(v) { $('#drawer').classList.toggle('open', v); $('#scrim').classList.toggle('show', v); }
+$('#menuBtn').onclick = () => openDrawer(true);
+$('#scrim').onclick = () => openDrawer(false);
+window.addEventListener('hashchange', () => { S.route = decodeURIComponent(location.hash.slice(1)) || 'panel'; openDrawer(false); render(); window.scrollTo(0, 0); });
+$('#monthSel').onchange = e => { S.month = e.target.value; store.set('vs_month', S.month); render(); };
+
+/* ===== charts ===== */
+function killCharts() { S.charts.forEach(c => c.destroy()); S.charts = []; }
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function chart(id, cfg) {
+  if (!window.Chart) return;
+  const el = document.getElementById(id); if (!el) return;
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.color = cssVar('--muted');
+  S.charts.push(new Chart(el, cfg));
+}
+const gridOpts = () => ({ grid: { color: cssVar('--line') }, border: { display: false } });
+
+/* ===== views ===== */
+function render() {
+  killCharts(); renderNav();
+  const r = S.route, fab = $('#fab');
+  const showMonth = r !== 'settings';
+  $('#monthWrap').hidden = !showMonth;
+  if (S.data) {
+    const opts = monthsAvailable();
+    if (!S.month || !opts.includes(S.month)) S.month = opts.includes(store.get('vs_month')) ? store.get('vs_month') : ymOf(todayISO());
+    $('#monthSel').innerHTML = opts.map(ym => `<option value="${ym}" ${ym === S.month ? 'selected' : ''}>${monthName(ym)}</option>`).join('');
+  }
+  $('#pageStatus').textContent = ''; $('#pageStatus').className = 'status';
+  fab.hidden = true;
+  if (r === 'settings' || !S.data) return viewSettings();
+  if (r.startsWith('acc:')) { fab.hidden = false; fab.onclick = () => saleForm(r.slice(4)); return viewAccount(r.slice(4)); }
+  if (r === 'expenses') { fab.hidden = false; fab.onclick = () => expenseForm(); return viewExpenses(); }
+  if (r === 'work') { fab.hidden = false; fab.onclick = () => workForm(); return viewWork(); }
+  return viewPanel();
+}
+function setTitle(t) { $('#pageTitle').textContent = t; document.title = `${t} · Vinted`; }
+
+function kpi(icon, label, value, extra = '', cls = '') {
+  return `<div class="card ${cls}"><div class="label">${ICONS[icon]}${label}</div><div class="big">${value}</div>${extra}</div>`;
+}
+
+function viewAccount(id) {
+  const acc = S.data.accounts.find(a => a.id === id);
+  if (!acc) { location.hash = 'panel'; return; }
+  setTitle(id);
+  const st = $('#pageStatus'); st.textContent = acc.status === 'archive' ? '● Архів' : '● Активний'; st.className = 'status' + (acc.status === 'archive' ? ' archive' : '');
+  const all = sales(id), ym = S.month, prevYM = shiftYM(ym, -1), lyYM = shiftYM(ym, -12);
+  const cur = inYM(all, ym), prev = inYM(all, prevYM), ly = inYM(all, lyYM);
+  const sCur = sum(cur, x => x.amount), sPrev = sum(prev, x => x.amount), sLy = sum(ly, x => x.amount);
+  const iCur = sum(cur, x => x.items), iPrev = sum(prev, x => x.items);
+  const avg = iCur ? sCur / iCur : 0, avgPrev = iPrev ? sPrev / iPrev : 0;
+  const bm = Object.entries(byMonth(all)).sort((a, b) => b[1] - a[1])[0];
+  const best = byDay(cur).sort((a, b) => b.amount - a.amount).slice(0, 3);
+  const totalAll = sum(inYM(sales(), ym), x => x.amount);
+  // running totals
+  const sorted = [...cur].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  let run = 0; const runMap = {}; sorted.forEach(s => { run = r2(run + s.amount); runMap[s.id] = run; });
+  const rows = [...sorted].reverse();
+
+  $('#view').innerHTML = `
+  <div class="grid g4">
+    ${kpi('chart', 'Продажі за рік', money(ytd(all, ym)), pct(ytd(all, ym), ytdPrev(all, ym)), 'dark')}
+    ${kpi('cal', 'Продажі за місяць', money(sCur), pct(sCur, sPrev))}
+    ${kpi('box', 'Кількість речей', iCur, pct(iCur, iPrev))}
+    ${kpi('star', 'Середній чек', money(avg), pct(avg, avgPrev))}
+  </div>
+  <div class="grid g4">
+    <div class="card"><div class="label">${ICONS.swap}Порівняння з минулим місяцем</div>${diffHtml(sCur, sPrev)}${sPrev ? pct(sCur, sPrev) : ''}<div class="sub">${monthName(prevYM)}: ${money(sPrev)}</div></div>
+    <div class="card"><div class="label">${ICONS.swap}Той самий місяць ${+ym.slice(0, 4) - 1}</div>${diffHtml(sCur, sLy)}${sLy ? pct(sCur, sLy) : ''}<div class="sub">${monthName(lyYM)}: ${money(sLy)}</div></div>
+    <div class="card span2-m"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
+    <div class="card span2-m"><div class="label">${ICONS.star}Найкращі дні місяця</div><div class="list-days">${best.length ? best.map(b => `<div><span>${dmy(b.date)}</span><b>${money(b.amount)}</b></div>`).join('') : '<div class="sub">ще немає продажів</div>'}</div></div>
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Продажі акаунта</h2><span class="sub">${totalAll ? `${Math.round(sCur / totalAll * 100)}% усіх продажів` : ''}</span></div>
+    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Речей</th><th>Сума<br><span style="font-weight:400">наростаючим</span></th></tr></thead><tbody>
+      ${rows.map(s => `<tr class="tap" data-id="${s.id}"><td>${dmy(s.date)} <span class="muted">${DOW[new Date(s.date + 'T12:00').getDay()]}</span></td><td>${s.items}</td><td><b>${money(s.amount)}</b><div class="sub">${money(runMap[s.id])}</div></td></tr>`).join('')}
+    </tbody></table></div>` : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : 'У цьому місяці ще немає продажів.<br>Натисніть «+», щоб додати.'}</div>`}
+  </div>`;
+  $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
+}
+
+function viewPanel() {
+  setTitle('Панель');
+  const ym = S.month, prevYM = shiftYM(ym, -1), year = ym.slice(0, 4);
+  const all = sales(), cur = inYM(all, ym), prev = inYM(all, prevYM);
+  const sCur = sum(cur, x => x.amount), sPrev = sum(prev, x => x.amount);
+  const iCur = sum(cur, x => x.items);
+  const eCur = sum(inYM(S.data.expenses, ym), x => x.amount), ePrev = sum(inYM(S.data.expenses, prevYM), x => x.amount);
+  const mCur = sum(inYM(S.data.work, ym), x => x.minutes), mPrev = sum(inYM(S.data.work, prevYM), x => x.minutes);
+  const profit = r2(sCur - eCur), profitPrev = r2(sPrev - ePrev);
+  const hourly = mCur ? profit / (mCur / 60) : 0, hourlyPrev = mPrev ? profitPrev / (mPrev / 60) : 0;
+  const goal = +S.data.settings.goal || 0, goalP = goal ? Math.min(100, sCur / goal * 100) : 0;
+  const isNow = ym === ymOf(todayISO()), dayNow = new Date().getDate();
+  const forecast = isNow && dayNow ? sCur / dayNow * daysIn(ym) : sCur;
+  const bestDay = byDay(cur).sort((a, b) => b.amount - a.amount)[0];
+  const bm = Object.entries(byMonth(all)).sort((a, b) => b[1] - a[1])[0];
+  const accs = S.data.accounts.map((a, i) => { const x = inYM(sales(a.id), ym); return { ...a, s: sum(x, y => y.amount), n: sum(x, y => y.items), c: ACC_COLORS[i % ACC_COLORS.length] }; });
+  // monthly table for the selected year (+ months with data)
+  const months = []; for (let m = 1; m <= 12; m++) months.push(`${year}-${String(m).padStart(2, '0')}`);
+  const mrows = months.map((k, i) => {
+    const sl = inYM(all, k), s = sum(sl, x => x.amount), n = sum(sl, x => x.items), e = sum(inYM(S.data.expenses, k), x => x.amount), w = sum(inYM(S.data.work, k), x => x.minutes);
+    return { k, s, n, e, p: r2(s - e), w };
+  });
+  const prevYear = String(+year - 1), hasPrevYear = all.some(s => s.date.startsWith(prevYear));
+
+  $('#view').innerHTML = `
+  <div class="grid g3">
+    <div class="card dark span2-m">${`<div class="label">${ICONS.cal}Продажі за місяць</div><div class="big">${money(sCur)}</div>${pct(sCur, sPrev)}<div class="sub">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div>`}</div>
+    ${kpi('chart', `Продажі за ${year} рік`, money(ytd(all, ym)), pct(ytd(all, ym), ytdPrev(all, ym)))}
+    ${kpi('wallet', 'Витрати за місяць', money(eCur), pct(eCur, ePrev).replace('up', 'tmp').replace('down', 'up').replace('tmp', 'down'))}
+    ${kpi('coin', 'Чистий прибуток', money(profit), pct(profit, profitPrev))}
+    ${kpi('clock', 'Вартість години', mCur ? money(hourly) : '—', `${mCur ? pct(hourly, hourlyPrev) : ''}<div class="sub">${hmShort(mCur)} год роботи (приблизно)</div>`)}
+    <div class="card span2-m"><div class="label">${ICONS.target}Ціль на місяць</div><div class="mid">Виконано ${Math.round(goalP)}%</div>
+      <div class="progress"><i style="width:${goalP}%"></i></div>
+      <div class="goal-row"><span>${money(sCur)}</span><span>з ${money(goal)}</span></div>
+      <div class="sub" style="margin-top:8px">${ICONS.trend.replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px"')} Прогноз на кінець місяця: <b style="color:var(--ink)">${money(forecast)}</b></div></div>
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Продажі по місяцях</h2><span class="sub">${year}</span></div>
+    <div class="chart-box"><canvas id="cMonths"></canvas></div>
+  </div>
+  <div class="grid g3">
+    <div class="card span2"><div class="section-title"><h2>Ріст суми за місяць</h2><span class="sub">${MONTHS[+ym.slice(5) - 1].toLowerCase()} vs ${MONTHS[+prevYM.slice(5) - 1].toLowerCase()}</span></div><div class="chart-box small"><canvas id="cRun"></canvas></div></div>
+    <div class="card span2-m"><div class="section-title"><h2>Акаунти</h2><span class="sub">${monthName(ym)}</span></div>
+      ${sCur ? `<div class="chart-box small"><canvas id="cAcc"></canvas></div>` : ''}
+      ${accs.map(a => `<a href="#acc:${a.id}" style="color:inherit;text-decoration:none"><div class="acc-row"><span class="dot" style="background:${a.c}"></span><span class="name">${esc(a.id)}<small>${a.n} речей${a.status === 'archive' ? ' · архів' : ''}</small></span><b>${money(a.s)}</b></div></a>`).join('')}
+      <div class="acc-row"><span class="dot" style="background:transparent"></span><span class="name">Разом</span><b>${money(sCur)}</b></div>
+    </div>
+  </div>
+  <div class="grid g3">
+    <div class="card"><div class="label">${ICONS.star}Найкращий день місяця</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>
+    <div class="card"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
+    <div class="card span2-m"><div class="label">${ICONS.swap}${monthName(ym)} vs ${prevYear}</div>${hasPrevYear ? `${diffHtml(sCur, sum(inYM(all, shiftYM(ym, -12)), x => x.amount))}<div class="sub">${monthName(shiftYM(ym, -12))}: ${money(sum(inYM(all, shiftYM(ym, -12)), x => x.amount))}</div>` : `<div class="mid flat">немає даних за ${prevYear}</div><div class="sub">з'явиться, коли додамо продажі ${prevYear} року</div>`}</div>
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Підсумок по місяцях</h2><span class="sub">${year}</span></div>
+    <div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Речей</th><th>Продажі</th><th>Витрати</th><th>Прибуток</th><th>Години</th><th>Δ</th></tr></thead><tbody>
+    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const p = mrows.find(x => x.k === shiftYM(m.k, -1)); const ps = p ? p.s : 0; return `<tr><td>${MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td><td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
+    </tbody></table></div>
+  </div>`;
+
+  const ink = cssVar('--ink'), muted = cssVar('--muted');
+  chart('cMonths', { type: 'bar', data: { labels: MONTHS_SHORT, datasets: [{ data: mrows.map(m => m.s), backgroundColor: mrows.map(m => m.k === ym ? muted : ink), borderRadius: 10, borderSkipped: false, maxBarThickness: 34 }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => money(c.raw) } } }, scales: { x: { grid: { display: false }, border: { display: false } }, y: { ...gridOpts(), ticks: { callback: v => moneyShort(v) } } } } });
+  const runSeries = (k) => { const days = daysIn(k), byD = {}; inYM(all, k).forEach(s => { const d = +s.date.slice(8); byD[d] = (byD[d] || 0) + s.amount; }); let acc = 0; const out = []; const lim = k === ymOf(todayISO()) ? new Date().getDate() : days; for (let d = 1; d <= days; d++) { acc += byD[d] || 0; out.push(d <= lim ? r2(acc) : null); } return out; };
+  const nDays = Math.max(daysIn(ym), daysIn(prevYM));
+  chart('cRun', { type: 'line', data: { labels: Array.from({ length: nDays }, (_, i) => i + 1), datasets: [
+    { label: monthName(ym), data: runSeries(ym), borderColor: ink, backgroundColor: ink, tension: .3, pointRadius: 0, borderWidth: 2.5 },
+    { label: monthName(prevYM), data: runSeries(prevYM), borderColor: muted, borderDash: [5, 4], tension: .3, pointRadius: 0, borderWidth: 1.8 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { boxWidth: 10, boxHeight: 10 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 8 } }, y: { ...gridOpts(), ticks: { callback: v => moneyShort(v) } } } } });
+  if (sCur) chart('cAcc', { type: 'doughnut', data: { labels: accs.map(a => a.id), datasets: [{ data: accs.map(a => a.s), backgroundColor: accs.map(a => a.c), borderWidth: 0 }] },
+    options: { maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.label}: ${money(c.raw)}` } } } } });
+}
+
+function viewExpenses() {
+  setTitle('Витрати');
+  const ym = S.month, ex = S.data.expenses, cur = inYM(ex, ym), prev = inYM(ex, shiftYM(ym, -1));
+  const y = ym.slice(0, 4), yr = ex.filter(e => e.date.startsWith(y));
+  const sCur = sum(cur, e => e.amount);
+  const rows = [...cur].sort((a, b) => b.date.localeCompare(a.date));
+  $('#view').innerHTML = `
+  <div class="grid g4">
+    ${kpi('wallet', 'Витрати за місяць', money(sCur), pct(sCur, sum(prev, e => e.amount)).replace('up', 'tmp').replace('down', 'up').replace('tmp', 'down'), 'dark')}
+    ${kpi('chart', `Витрати за ${y} рік`, money(sum(yr, e => e.amount)))}
+    ${kpi('box', 'Закупок за місяць', cur.length)}
+    ${kpi('star', 'Середньо за закупку', money(cur.length ? sCur / cur.length : 0))}
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Записи</h2><span class="sub">${monthName(ym)}</span></div>
+    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>На що</th><th>Сума</th></tr></thead><tbody>
+    ${rows.map(e => `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${DOW[new Date(e.date + 'T12:00').getDay()]}</span></td><td class="muted">${esc(e.category)}</td><td><b>${money(e.amount)}</b></td></tr>${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`).join('')}
+    </tbody></table></div>` : '<div class="empty">У цьому місяці витрат немає.<br>Натисніть «+», щоб додати.</div>'}
+  </div>`;
+  $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => expenseForm(ex.find(e => e.id === tr.dataset.id)));
+}
+
+function viewWork() {
+  setTitle('Час роботи');
+  const ym = S.month, w = S.data.work, cur = inYM(w, ym), prev = inYM(w, shiftYM(ym, -1));
+  const mCur = sum(cur, x => x.minutes), days = cur.filter(x => x.minutes > 0).length;
+  const rows = [...cur].sort((a, b) => b.date.localeCompare(a.date));
+  $('#view').innerHTML = `
+  <div class="grid g4">
+    ${kpi('clock', 'Години за місяць', hmShort(mCur), pct(mCur, sum(prev, x => x.minutes)), 'dark')}
+    ${kpi('chart', 'Всього годин', hmShort(sum(w, x => x.minutes)), '<div class="sub">години приблизні</div>')}
+    ${kpi('cal', 'Робочих днів', days, `<div class="sub">вихідних: ${cur.filter(x => x.dayoff).length}</div>`)}
+    ${kpi('star', 'Середньо за день', hmShort(days ? mCur / days : 0))}
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Записи</h2><span class="sub">${monthName(ym)}</span></div>
+    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Час</th><th></th></tr></thead><tbody>
+    ${rows.map(x => `<tr class="tap" data-id="${x.id}"><td>${dmy(x.date)} <span class="muted">${DOW[new Date(x.date + 'T12:00').getDay()]}</span></td><td><b>${x.dayoff ? '—' : hmShort(x.minutes)}</b></td><td class="muted">${x.dayoff ? 'вихідний' : ''}</td></tr>${x.note ? `<tr class="tap" data-id="${x.id}"><td colspan="3" class="note">${esc(x.note)}</td></tr>` : ''}`).join('')}
+    </tbody></table></div>` : '<div class="empty">У цьому місяці записів немає.<br>Натисніть «+», щоб додати.</div>'}
+  </div>`;
+  $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => workForm(w.find(x => x.id === tr.dataset.id)));
+}
+
+function viewSettings(err) {
+  setTitle('Налаштування'); $('#monthWrap').hidden = true; $('#fab').hidden = true;
+  const has = !!store.get('vs_token');
+  $('#view').innerHTML = `
+  ${err ? `<div class="card" style="border:1px solid var(--red)"><b class="down">${err}</b></div>` : ''}
+  <div class="card help">
+    <div class="section-title"><h2>Підключення до даних</h2><span class="sub">${has ? '<span class="up">● підключено</span>' : '<span class="down">● не підключено</span>'}</span></div>
+    <p>Дані зберігаються у вашому приватному сховищі GitHub <code>${GH.repo}</code>. Щоб сайт міг їх читати й записувати, на кожному пристрої (телефон, комп'ютер) один раз вставте ключ доступу.</p>
+    <label class="field"><span>Ключ доступу GitHub</span><input id="tok" type="password" autocomplete="off" placeholder="${has ? 'вже збережено — вставте новий, щоб замінити' : 'github_pat_…'}"></label>
+    <button class="btn" id="saveTok">Зберегти ключ</button>
+    ${has ? '<button class="btn danger" id="delTok">Вийти на цьому пристрої</button>' : ''}
+  </div>
+  ${S.data ? `<div class="card">
+    <div class="section-title"><h2>Ціль на місяць</h2></div>
+    <label class="field"><span>Сума, zł</span><input id="goal" type="number" inputmode="decimal" value="${S.data.settings.goal || ''}"></label>
+    <button class="btn" id="saveGoal">Зберегти ціль</button>
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Резервна копія</h2></div>
+    <p class="sub">Кожна зміна вже зберігається окремою версією в GitHub. Додатково можна завантажити файл для Excel.</p>
+    <button class="btn ghost" id="csv">Завантажити продажі (CSV для Excel)</button>
+    <button class="btn ghost" id="json">Завантажити всі дані (JSON)</button>
+  </div>` : ''}`;
+  $('#saveTok').onclick = async () => {
+    const v = $('#tok').value.trim(); if (!v) return toast('Вставте ключ');
+    store.set('vs_token', v); toast('Перевіряю…');
+    try { await load(); toast('Підключено ✓'); location.hash = 'panel'; render(); }
+    catch (e) { store.del('vs_token'); viewSettings(e.message === 'token' ? 'Ключ не підходить. Перевірте, що він має доступ до vinted-stats-data (Contents: Read and write).' : 'Немає з’єднання з GitHub. Спробуйте пізніше.'); }
+  };
+  if ($('#delTok')) $('#delTok').onclick = () => { if (confirm('Видалити ключ з цього пристрою?')) { store.del('vs_token'); store.del('vs_cache'); location.reload(); } };
+  if ($('#saveGoal')) $('#saveGoal').onclick = () => { const g = r2(+$('#goal').value); if (!(g > 0)) return toast('Вкажіть суму'); save(`Ціль на місяць: ${g} zł`, d => { d.settings.goal = g; }); };
+  if ($('#csv')) $('#csv').onclick = () => {
+    const lines = ['Акаунт;Дата;Кількість речей;Сума (zł)'].concat([...S.data.sales].sort((a, b) => a.date.localeCompare(b.date)).map(s => `${s.account};${dmy(s.date)};${s.items};${String(s.amount).replace('.', ',')}`));
+    download('vinted-prodazhi.csv', '﻿' + lines.join('\r\n'), 'text/csv');
+  };
+  if ($('#json')) $('#json').onclick = () => download('vinted-dani.json', JSON.stringify(S.data, null, 1), 'application/json');
+}
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+
+/* ===== forms ===== */
+function openSheet(html, bind) {
+  $('#sheet').innerHTML = `<div class="grab"></div>${html}`;
+  $('#sheetWrap').hidden = false;
+  bind($('#sheet'));
+}
+function closeSheet() { $('#sheetWrap').hidden = true; }
+$('#sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') closeSheet(); });
+const num = v => { const n = parseFloat(String(v).replace(',', '.').replace(/\s/g, '')); return isFinite(n) ? n : NaN; };
+
+function saleForm(acc, s) {
+  const edit = !!s;
+  openSheet(`<h3>${edit ? 'Редагувати продаж' : 'Новий продаж'} · ${esc(acc)}</h3>
+    <label class="field"><span>Дата</span><input id="fDate" type="date" value="${s ? s.date : todayISO()}"></label>
+    <div class="row2"><label class="field"><span>Кількість речей</span><input id="fItems" type="number" inputmode="numeric" min="0" step="1" value="${s ? s.items : ''}" placeholder="1"></label>
+    <label class="field"><span>Сума, zł</span><input id="fAmt" type="text" inputmode="decimal" value="${s ? String(s.amount).replace('.', ',') : ''}" placeholder="0,00"></label></div>
+    <button class="btn" id="ok">${edit ? 'Зберегти зміни' : 'Додати продаж'}</button>
+    ${edit ? '<button class="btn danger" id="del">Видалити запис</button>' : ''}
+    <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
+    el.querySelector('#cancel').onclick = closeSheet;
+    if (!edit) setTimeout(() => el.querySelector('#fItems').focus(), 250);
+    el.querySelector('#ok').onclick = async () => {
+      const date = el.querySelector('#fDate').value, items = parseInt(el.querySelector('#fItems').value, 10), amount = r2(num(el.querySelector('#fAmt').value));
+      if (!date) return toast('Вкажіть дату'); if (!(items >= 0)) return toast('Вкажіть кількість речей'); if (!(amount >= 0)) return toast('Вкажіть суму');
+      closeSheet();
+      if (edit) await save(`Змінено продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł (було ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł)`, d => Object.assign(d.sales.find(x => x.id === s.id), { date, items, amount }));
+      else await save(`Продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł`, d => d.sales.push({ id: uid('s'), account: acc, date, items, amount }));
+      S.month = ymOf(date); render();
+    };
+    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити продаж ${dmy(s.date)} на ${money(s.amount)}?`)) return; closeSheet(); await save(`Видалено продаж ${acc} ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł`, d => { d.sales = d.sales.filter(x => x.id !== s.id); }); };
+  });
+}
+
+function expenseForm(e) {
+  const edit = !!e;
+  openSheet(`<h3>${edit ? 'Редагувати витрату' : 'Нова витрата'}</h3>
+    ${e && e.source ? `<div class="src">Запис у нотатці: ${esc(e.source)}</div>` : ''}
+    <div class="row2"><label class="field"><span>Дата</span><input id="fDate" type="date" value="${e ? e.date : todayISO()}"></label>
+    <label class="field"><span>Сума, zł</span><input id="fAmt" type="text" inputmode="decimal" value="${e ? String(e.amount).replace('.', ',') : ''}" placeholder="0,00"></label></div>
+    <label class="field"><span>На що</span><select id="fCat">${CATS.map(c => `<option ${e && e.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+    <label class="field"><span>Примітка (необов'язково)</span><input id="fNote" type="text" value="${e ? esc(e.note || '') : ''}"></label>
+    <button class="btn" id="ok">${edit ? 'Зберегти зміни' : 'Додати витрату'}</button>
+    ${edit ? '<button class="btn danger" id="del">Видалити запис</button>' : ''}
+    <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
+    el.querySelector('#cancel').onclick = closeSheet;
+    el.querySelector('#ok').onclick = async () => {
+      const date = el.querySelector('#fDate').value, amount = r2(num(el.querySelector('#fAmt').value)), category = el.querySelector('#fCat').value, note = el.querySelector('#fNote').value.trim();
+      if (!date) return toast('Вкажіть дату'); if (!(amount >= 0)) return toast('Вкажіть суму');
+      closeSheet();
+      if (edit) await save(`Змінено витрату ${dmy(date)}: ${amount} zł (${category})`, d => Object.assign(d.expenses.find(x => x.id === e.id), { date, amount, category, note }));
+      else await save(`Витрата ${dmy(date)}: ${amount} zł (${category})`, d => d.expenses.push({ id: uid('e'), date, category, amount, note }));
+      S.month = ymOf(date); render();
+    };
+    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити витрату ${dmy(e.date)} на ${money(e.amount)}?`)) return; closeSheet(); await save(`Видалено витрату ${dmy(e.date)}: ${e.amount} zł`, d => { d.expenses = d.expenses.filter(x => x.id !== e.id); }); };
+  });
+}
+
+function workForm(w) {
+  const edit = !!w, h = w && w.minutes != null ? Math.floor(w.minutes / 60) : '', m = w && w.minutes != null ? Math.round(w.minutes % 60) : '';
+  openSheet(`<h3>${edit ? 'Редагувати час' : 'Час роботи'}</h3>
+    ${w && w.source ? `<div class="src">Запис у нотатці: ${esc(w.source)}</div>` : ''}
+    <label class="field"><span>Дата</span><input id="fDate" type="date" value="${w ? w.date : todayISO()}"></label>
+    <div class="row2"><label class="field"><span>Години</span><input id="fH" type="number" inputmode="numeric" min="0" value="${h}" placeholder="0"></label>
+    <label class="field"><span>Хвилини</span><input id="fM" type="number" inputmode="numeric" min="0" max="59" value="${m}" placeholder="0"></label></div>
+    <label class="check"><input id="fOff" type="checkbox" ${w && w.dayoff ? 'checked' : ''}> Вихідний</label>
+    <label class="field"><span>Примітка (необов'язково)</span><input id="fNote" type="text" value="${w ? esc(w.note || '') : ''}"></label>
+    <button class="btn" id="ok">${edit ? 'Зберегти зміни' : 'Додати'}</button>
+    ${edit ? '<button class="btn danger" id="del">Видалити запис</button>' : ''}
+    <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
+    el.querySelector('#cancel').onclick = closeSheet;
+    el.querySelector('#ok').onclick = async () => {
+      const date = el.querySelector('#fDate').value, off = el.querySelector('#fOff').checked, note = el.querySelector('#fNote').value.trim();
+      const hh = parseInt(el.querySelector('#fH').value || '0', 10), mm = parseInt(el.querySelector('#fM').value || '0', 10);
+      if (!date) return toast('Вкажіть дату'); if (!(hh >= 0 && mm >= 0 && mm < 60)) return toast('Перевірте години і хвилини');
+      const minutes = off && !hh && !mm ? null : hh * 60 + mm;
+      closeSheet();
+      if (edit) await save(`Змінено час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => Object.assign(d.work.find(x => x.id === w.id), { date, minutes, dayoff: off, note }));
+      else await save(`Час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => d.work.push({ id: uid('w'), date, minutes, dayoff: off, note }));
+      S.month = ymOf(date); render();
+    };
+    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити запис за ${dmy(w.date)}?`)) return; closeSheet(); await save(`Видалено час роботи ${dmy(w.date)}`, d => { d.work = d.work.filter(x => x.id !== w.id); }); };
+  });
+}
+
+/* ===== start ===== */
+(async function start() {
+  S.route = decodeURIComponent(location.hash.slice(1)) || 'panel';
+  renderNav();
+  try { await load(); render(); }
+  catch (e) {
+    const cache = store.get('vs_cache');
+    if (e.message === 'net' && cache) { S.data = JSON.parse(cache); S.mode = 'offline'; render(); toast('Немає інтернету — показую останні збережені дані', 4000); }
+    else { S.route = 'settings'; viewSettings(e.message === 'token' && store.get('vs_token') ? 'Ключ доступу не підходить або застарів. Вставте новий.' : ''); }
+  }
+})();
