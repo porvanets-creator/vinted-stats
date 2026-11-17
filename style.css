@@ -179,3 +179,7 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#bdbdbd;transition:transform .2s,background .2s}
 .sw.on{background:#2e7d4f}
 .sw.on::after{transform:translateX(16px);background:#fff}
+
+.nav-cap{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#8d8d8d;padding:4px 12px 4px}
+.drawer-foot hr{border:0;border-top:1px solid #3a3a3a;margin:10px 6px}
+.grid:empty{display:none}

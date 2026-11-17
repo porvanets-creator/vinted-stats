@@ -136,9 +136,20 @@ function routes() {
 }
 function renderNav() {
   $('#nav').innerHTML = routes().map(r => r ? `<a href="#${r.id}" class="${S.route === r.id ? 'active' : ''}">${ICONS[r.icon]}<span>${esc(r.label)}</span>${r.tag ? `<span class="tag">${r.tag}</span>` : ''}</a>` : '<hr>').join('');
-  $('#navFoot').innerHTML = `<button class="nav-switch" id="cmpToggle" aria-pressed="${!cmpOff()}">${ICONS.swap}<span>Порівняння</span><i class="sw ${cmpOff() ? '' : 'on'}"></i></button>
+  const sw = (key, icon, label, on) => `<button class="nav-switch" data-sw="${key}" aria-pressed="${on}">${ICONS[icon]}<span>${label}</span><i class="sw ${on ? 'on' : ''}"></i></button>`;
+  $('#navFoot').innerHTML = `<div class="nav-cap">Показувати</div>
+    ${sw('cmp', 'swap', 'Порівняння', !cmpOff())}
+    ${sw('avg', 'star', 'Середній чек', show('avg'))}
+    ${sw('bestm', 'trophy', 'Найкращий місяць', show('bestm'))}
+    ${sw('bestd', 'cal', 'Найкращі дні', show('bestd'))}
+    <hr>
     <a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
-  $('#cmpToggle').onclick = () => { store.set('vs_cmp_off', cmpOff() ? '0' : '1'); toast(cmpOff() ? 'Порівняння приховано' : 'Порівняння показано'); render(); };
+  $('#navFoot').querySelectorAll('[data-sw]').forEach(b => b.onclick = () => {
+    const k = b.dataset.sw;
+    if (k === 'cmp') store.set('vs_cmp_off', cmpOff() ? '0' : '1');
+    else store.set('vs_hide_' + k, show(k) ? '1' : '0');
+    render();
+  });
 }
 function openDrawer(v) { $('#drawer').classList.toggle('open', v); $('#scrim').classList.toggle('show', v); }
 $('#menuBtn').onclick = () => openDrawer(true);
@@ -280,12 +291,10 @@ function viewAccount(id) {
   const dayCount = byDay(cur).length;
 
   $('#view').innerHTML = `
-  <div class="grid g4">
-    ${p.kind === 'all' ? kpi('chart', 'Днів з продажами', dayCount, `<div class="sub">в середньому ${money(dayCount ? sCur / dayCount : 0)} за день${firstDate ? ` · з ${dmy(firstDate)}` : ''}</div>`, 'dark')
-      : kpi('chart', 'Продажі за весь час', money(allSum), `<div class="sub">${allItems} речей${firstDate ? ` · з ${dmy(firstDate)}` : ''}</div>`, 'dark')}
-    ${kpi('cal', perLabel(p, 'Продажі за місяць', 'Продажі за рік'), money(sCur), cmp(sCur, S_, p))}
+  <div class="grid ${show('avg') ? 'g3' : ''}">
+    ${kpi('cal', perLabel(p, 'Продажі за місяць', 'Продажі за рік'), money(sCur), cmp(sCur, S_, p) + (p.kind === 'all' && firstDate ? `<div class="sub">з ${dmy(firstDate)}</div>` : ''), 'dark')}
     ${kpi('box', 'Кількість проданих речей', iCur, cmp(iCur, I_, p))}
-    ${kpi('star', 'Середній чек', money(avg), cmp(avg, A_, p))}
+    ${show('avg') ? kpi('star', 'Середній чек', money(avg), cmp(avg, A_, p), 'span2-m') : ''}
   </div>
   <div class="grid g3">
     ${!p.prev || cmpOff() ? '' : `<div class="card span2-m"><div class="card-head"><div class="label">${ICONS.swap}${p.cmpTitle}</div>${p.same ? `<button class="mini-btn" id="cmpMode" aria-label="Що показувати">${ICONS.plus}</button>` : ''}</div>
@@ -293,8 +302,8 @@ function viewAccount(id) {
       ${p.same && cmpMode() !== 'whole' ? diffBlock(sCur, sS, `За той самий час (${p.sameLabel})`, `${p.sameLabel}: ${money(sS)}`) : ''}
       ${!p.same || cmpMode() !== 'same' ? diffBlock(sCur, sP, p.same ? `За ${p.wholeLabel}` : `Проти: ${p.prevName}`, `${p.prevName}: ${money(sP)}`) : ''}`}
     </div>`}
-    <div class="card span2-m"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
-    <div class="card span2-m"><div class="label">${ICONS.star}${perLabel(p, 'Найкращі дні місяця', 'Найкращі дні року')}</div><div class="list-days">${best.length ? best.map(b => `<div><span>${dmy(b.date)}</span><b>${money(b.amount)}</b></div>`).join('') : '<div class="sub">ще немає продажів</div>'}</div></div>
+    ${!show('bestm') ? '' : `<div class="card span2-m"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>`}
+    ${!show('bestd') ? '' : `<div class="card span2-m"><div class="label">${ICONS.star}${perLabel(p, 'Найкращі дні місяця', 'Найкращі дні року')}</div><div class="list-days">${best.length ? best.map(b => `<div><span>${dmy(b.date)}</span><b>${money(b.amount)}</b></div>`).join('') : '<div class="sub">ще немає продажів</div>'}</div></div>`}
   </div>
   <div class="card">
     <div class="section-title"><h2>Продажі акаунта</h2><span class="sub">${totalAll ? `${Math.round(sCur / totalAll * 100)}% усіх продажів` : ''}</span></div>
@@ -305,6 +314,7 @@ function viewAccount(id) {
   if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
 }
 const cmpOff = () => store.get('vs_cmp_off') === '1';
+const show = k => store.get('vs_hide_' + k) !== '1';
 const cmpMode = () => ['same', 'whole', 'both'].includes(store.get('vs_cmpmode')) ? store.get('vs_cmpmode') : 'both';
 function cmpModeSheet(p) {
   const cur = cmpMode();
@@ -353,9 +363,7 @@ function viewPanel() {
 
   $('#view').innerHTML = `
   <div class="grid g3">
-    <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same && !cmpOff() ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div></div>
-    ${p.kind === 'all' ? kpi('chart', `Продажі за ${thisYear} рік`, money(sum(yearSales, x => x.amount)), `<div class="sub">${sum(yearSales, x => x.items)} речей · усі акаунти</div>`)
-      : kpi('chart', 'Продажі за весь час', money(sum(all, x => x.amount)), `<div class="sub">${sum(all, x => x.items)} речей · усі акаунти</div>`)}
+    <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same && !cmpOff() ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей${show('avg') ? ` · середній чек ${money(iCur ? sCur / iCur : 0)}` : ''}</div></div>
     ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(eCur), cmp(eCur, E_, p, true))}
     ${kpi('coin', 'Чистий прибуток', money(profit), cmp(profit, PR_, p))}
     ${kpi('clock', 'Вартість години', mCur ? money(hourly) : '—', `${mCur ? cmp(hourly, H_, p) : ''}<div class="sub">${hmShort(mCur)} год роботи (приблизно)${mCur && p.start < wFirst ? ` · рахується з ${dmy(wFirst)}` : ''}</div>`)}
@@ -377,8 +385,8 @@ function viewPanel() {
     </div>
   </div>
   <div class="grid">
-    <div class="card"><div class="label">${ICONS.star}${perLabel(p, 'Найкращий день місяця', 'Найкращий день року')}</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>
-    <div class="card"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
+    ${!show('bestd') ? '' : `<div class="card ${show('bestm') ? '' : 'span2'}"><div class="label">${ICONS.star}${perLabel(p, 'Найкращий день місяця', 'Найкращий день року')}</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>`}
+    ${!show('bestm') ? '' : `<div class="card ${show('bestd') ? '' : 'span2'}"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>`}
   </div>
   <div class="card">
     <div class="section-title"><h2>Підсумок по місяцях</h2><span class="sub">${p.kind === 'all' ? 'весь час' : year}</span></div>
