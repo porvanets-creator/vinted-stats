@@ -4,7 +4,7 @@ const GH = { owner: 'porvanets-creator', repo: 'vinted-stats-data', path: 'data.
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
 const MONTHS_SHORT = ['Січ','Лют','Бер','Кві','Тра','Чер','Лип','Сер','Вер','Жов','Лис','Гру'];
 const DOW = ['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
-const CATS = ['Закупка (секонд)','Закупка (Vinted)','Просування Vinted','Пакування','Пошта','Інше'];
+const CATS = ['Закупка (секонд)','Закупка (Vinted)','Просування Vinted','Просування eBay','Пакування','Пошта','Інше'];
 const ACC_COLORS = ['#262626','#7a7a7a','#b0b0b0','#4f6d5c','#c9c9c9','#8a6d4f'];
 
 const ICONS = {
@@ -348,6 +348,10 @@ function viewAccount(id) {
     ${sorted.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Речей</th><th>Сума<br><span style="font-weight:400">наростаючим за місяць</span></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
       : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : `За ${perWord(p)} ще немає продажів.<br>Натисніть «+», щоб додати.`}</div>`}
   </div>`;
+  const pays = (S.data.payouts || []).filter(x => x.account === id && x.date >= p.start && x.date <= p.end).sort((a, b) => b.date.localeCompare(a.date));
+  if (pays.length) $('#view').insertAdjacentHTML('beforeend', `<div class="card"><div class="section-title"><h2>Виплати на банк</h2><span class="sub">${p.name}</span></div>
+    <div class="list-days">${pays.map(x => `<div><span>${dmy(x.date)} <span class="muted">· ${esc(x.bank || '')}</span></span><b>${nf2.format(x.amount)} ${x.currency === 'EUR' ? '€' : esc(x.currency || '')}</b></div>`).join('')}</div>
+    <div class="sub" style="margin-top:8px">Коли гроші прийшли на рахунок. На суми продажів не впливає.</div></div>`);
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
   if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
 }
