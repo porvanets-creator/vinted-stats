@@ -154,16 +154,77 @@ function chart(id, cfg) {
 }
 const gridOpts = () => ({ grid: { color: cssVar('--line') }, border: { display: false } });
 
+/* ===== periods ===== */
+const MONTHS_GEN = ['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
+const pad2 = n => String(n).padStart(2, '0');
+const lc = s => s.charAt(0).toLowerCase() + s.slice(1);
+// P = { kind, start, end, prev:{start,end}, same:{start,end}|null, ... labels }
+function period(key) {
+  const today = todayISO();
+  if (key.startsWith('Y')) {
+    const y = +key.slice(1), start = `${y}-01-01`, end = `${y}-12-31`;
+    const ongoing = today >= start && today <= end;
+    let sameEnd = `${y - 1}${today.slice(4)}`; if (sameEnd.endsWith('02-29')) sameEnd = `${y - 1}-02-28`;
+    return { kind: 'year', key, year: String(y), start, end, ongoing,
+      prev: { start: `${y - 1}-01-01`, end: `${y - 1}-12-31` },
+      same: ongoing ? { start: `${y - 1}-01-01`, end: sameEnd } : null,
+      unit: 'рік', name: `${y} рік`, cmpTitle: 'Порівняння з минулим роком',
+      sameLabel: `1 січня – ${+today.slice(8)} ${MONTHS_GEN[+today.slice(5, 7) - 1]} ${y - 1}`,
+      wholeLabel: ongoing ? `весь ${y - 1} рік` : `${y - 1} рік`, prevName: `${y - 1} рік` };
+  }
+  const ym = key, pym = shiftYM(ym, -1), dP = daysIn(pym);
+  const ongoing = ym === ymOf(today), day = Math.min(+today.slice(8), dP);
+  return { kind: 'month', key, ym, year: ym.slice(0, 4), start: `${ym}-01`, end: `${ym}-${pad2(daysIn(ym))}`, ongoing,
+    prev: { start: `${pym}-01`, end: `${pym}-${pad2(dP)}` },
+    same: ongoing ? { start: `${pym}-01`, end: `${pym}-${pad2(day)}` } : null,
+    unit: 'місяць', name: monthName(ym), cmpTitle: 'Порівняння з минулим місяцем',
+    sameLabel: `1–${day} ${MONTHS_GEN[+pym.slice(5) - 1]}`,
+    wholeLabel: ongoing ? `весь ${lc(MONTHS[+pym.slice(5) - 1])}` : monthName(pym), prevName: monthName(pym) };
+}
+const P = () => period(S.month);
+const forP = (arr, p) => inRange(arr, p.start, p.end);
+// one comparison line
+function cmpLine(cur, prev, label, invert) {
+  if (!prev) return `<div class="cmp"><span class="chg flat">—</span><span class="sub">немає даних · ${label}</span></div>`;
+  const v = Math.round((cur / prev - 1) * 100);
+  const good = invert ? v < 0 : v > 0;
+  const cls = v === 0 ? 'flat' : good ? 'up' : 'down';
+  const txt = v === 0 ? '→ 0%' : v > 0 ? `↑ +${v}%` : `↓ −${Math.abs(v)}%`;
+  return `<div class="cmp"><span class="chg ${cls}">${txt}</span><span class="sub">${label}</span></div>`;
+}
+// f(start,end) → number; shows "same period" line (if period is ongoing) + "whole previous period" line
+function cmp(cur, f, p, invert) {
+  if (!f(p.prev.start, p.prev.end)) return `<div class="cmps"><div class="cmp"><span class="chg flat">—</span><span class="sub">немає даних за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} для порівняння</span></div></div>`;
+  let h = '';
+  if (p.same) h += cmpLine(cur, f(p.same.start, p.same.end), `vs ${p.sameLabel}`, invert);
+  h += cmpLine(cur, f(p.prev.start, p.prev.end), `vs ${p.wholeLabel}`, invert);
+  return `<div class="cmps">${h}</div>`;
+}
+function diffBlock(cur, prev, title, sub) {
+  const d = r2(cur - prev);
+  const val = !prev ? '<div class="mid flat">немає даних</div>'
+    : `<div class="mid ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : d < 0 ? '−' : ''}${money(Math.abs(d))}</div>`;
+  return `<div class="diff"><div class="sub">${title}</div>${val}<div class="sub">${sub}</div></div>`;
+}
+function monthOptions() {
+  const months = monthsAvailable(), out = [];
+  let lastY = null;
+  months.forEach(ym => { const y = ym.slice(0, 4); if (y !== lastY) { out.push({ v: 'Y' + y, t: `Весь ${y} рік` }); lastY = y; } out.push({ v: ym, t: monthName(ym) }); });
+  return out;
+}
+function focusDate(date) { if (!(S.month.startsWith('Y') && S.month.slice(1) === date.slice(0, 4))) S.month = ymOf(date); store.set('vs_month', S.month); }
+const dowOf = d => DOW[new Date(d + 'T12:00').getDay()];
+const sepRow = (k, cols, extra) => `<tr class="sep"><td colspan="${cols}">${monthName(k)}${extra ? ` · ${extra}` : ''}</td></tr>`;
+
 /* ===== views ===== */
 function render() {
   killCharts(); renderNav();
   const r = S.route, fab = $('#fab');
-  const showMonth = r !== 'settings';
-  $('#monthWrap').hidden = !showMonth;
+  $('#monthWrap').hidden = r === 'settings';
   if (S.data) {
-    const opts = monthsAvailable();
-    if (!S.month || !opts.includes(S.month)) S.month = opts.includes(store.get('vs_month')) ? store.get('vs_month') : ymOf(todayISO());
-    $('#monthSel').innerHTML = opts.map(ym => `<option value="${ym}" ${ym === S.month ? 'selected' : ''}>${monthName(ym)}</option>`).join('');
+    const opts = monthOptions(), vals = opts.map(o => o.v);
+    if (!S.month || !vals.includes(S.month)) S.month = vals.includes(store.get('vs_month')) ? store.get('vs_month') : ymOf(todayISO());
+    $('#monthSel').innerHTML = opts.map(o => `<option value="${o.v}" ${o.v === S.month ? 'selected' : ''}>${o.t}</option>`).join('');
   }
   $('#pageStatus').textContent = ''; $('#pageStatus').className = 'status';
   fab.hidden = true;
@@ -174,119 +235,137 @@ function render() {
   return viewPanel();
 }
 function setTitle(t) { $('#pageTitle').textContent = t; document.title = `${t} · Vinted`; }
-
 function kpi(icon, label, value, extra = '', cls = '') {
   return `<div class="card ${cls}"><div class="label">${ICONS[icon]}${label}</div><div class="big">${value}</div>${extra}</div>`;
 }
+const perLabel = (p, m, y) => p.kind === 'year' ? y : m;
 
 function viewAccount(id) {
   const acc = S.data.accounts.find(a => a.id === id);
   if (!acc) { location.hash = 'panel'; return; }
   setTitle(id);
   const st = $('#pageStatus'); st.textContent = acc.status === 'archive' ? '● Архів' : '● Активний'; st.className = 'status' + (acc.status === 'archive' ? ' archive' : '');
-  const all = sales(id), ym = S.month, prevYM = shiftYM(ym, -1), lyYM = shiftYM(ym, -12);
-  const cur = inYM(all, ym), prev = inYM(all, prevYM), ly = inYM(all, lyYM);
-  const sCur = sum(cur, x => x.amount), sPrev = sum(prev, x => x.amount), sLy = sum(ly, x => x.amount);
-  const iCur = sum(cur, x => x.items), iPrev = sum(prev, x => x.items);
-  const avg = iCur ? sCur / iCur : 0, avgPrev = iPrev ? sPrev / iPrev : 0;
+  const p = P(), all = sales(id), cur = forP(all, p);
+  const S_ = (a, b) => sum(inRange(all, a, b), x => x.amount), I_ = (a, b) => sum(inRange(all, a, b), x => x.items);
+  const A_ = (a, b) => { const i = I_(a, b); return i ? S_(a, b) / i : 0; };
+  const sCur = sum(cur, x => x.amount), iCur = sum(cur, x => x.items), avg = iCur ? sCur / iCur : 0;
+  const allSum = sum(all, x => x.amount), allItems = sum(all, x => x.items);
+  const firstDate = all.length ? all.map(x => x.date).sort()[0] : null;
   const bm = Object.entries(byMonth(all)).sort((a, b) => b[1] - a[1])[0];
   const best = byDay(cur).sort((a, b) => b.amount - a.amount).slice(0, 3);
-  const totalAll = sum(inYM(sales(), ym), x => x.amount);
-  // running totals
+  const totalAll = sum(forP(sales(), p), x => x.amount);
   const sorted = [...cur].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-  let run = 0; const runMap = {}; sorted.forEach(s => { run = r2(run + s.amount); runMap[s.id] = run; });
-  const rows = [...sorted].reverse();
+  const runMap = {}, mTot = {}; let run = 0, lastM = null;
+  sorted.forEach(s => { const m = ymOf(s.date); if (m !== lastM) { run = 0; lastM = m; } run = r2(run + s.amount); runMap[s.id] = run; mTot[m] = run; });
+  let rowsHtml = '', lm = null;
+  [...sorted].reverse().forEach(s => {
+    const m = ymOf(s.date);
+    if (p.kind === 'year' && m !== lm) { rowsHtml += sepRow(m, 3, money(mTot[m])); lm = m; }
+    rowsHtml += `<tr class="tap" data-id="${s.id}"><td>${dmy(s.date)} <span class="muted">${dowOf(s.date)}</span></td><td>${s.items}</td><td><b>${money(s.amount)}</b><div class="sub">${money(runMap[s.id])}</div></td></tr>`;
+  });
+  const sP = S_(p.prev.start, p.prev.end), sS = p.same ? S_(p.same.start, p.same.end) : 0;
 
   $('#view').innerHTML = `
   <div class="grid g4">
-    ${kpi('chart', 'Продажі за рік', money(ytd(all, ym)), pct(ytd(all, ym), ytdPrev(all, ym)), 'dark')}
-    ${kpi('cal', 'Продажі за місяць', money(sCur), pct(sCur, sPrev))}
-    ${kpi('box', 'Кількість речей', iCur, pct(iCur, iPrev))}
-    ${kpi('star', 'Середній чек', money(avg), pct(avg, avgPrev))}
+    ${kpi('chart', 'Продажі за весь час', money(allSum), `<div class="sub">${allItems} речей${firstDate ? ` · з ${dmy(firstDate)}` : ''}</div>`, 'dark')}
+    ${kpi('cal', perLabel(p, 'Продажі за місяць', 'Продажі за рік'), money(sCur), cmp(sCur, S_, p))}
+    ${kpi('box', 'Кількість проданих речей', iCur, cmp(iCur, I_, p))}
+    ${kpi('star', 'Середній чек', money(avg), cmp(avg, A_, p))}
   </div>
-  <div class="grid g4">
-    <div class="card"><div class="label">${ICONS.swap}Порівняння з минулим місяцем</div>${diffHtml(sCur, sPrev)}${sPrev ? pct(sCur, sPrev) : ''}<div class="sub">${monthName(prevYM)}: ${money(sPrev)}</div></div>
-    <div class="card"><div class="label">${ICONS.swap}Той самий місяць ${+ym.slice(0, 4) - 1}</div>${diffHtml(sCur, sLy)}${sLy ? pct(sCur, sLy) : ''}<div class="sub">${monthName(lyYM)}: ${money(sLy)}</div></div>
+  <div class="grid g3">
+    <div class="card span2-m"><div class="label">${ICONS.swap}${p.cmpTitle}</div>
+      ${!sP ? `<div class="mid flat">немає даних</div><div class="sub">за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} продажів не записано</div>` : `
+      ${p.same ? diffBlock(sCur, sS, `За той самий час (${p.sameLabel})`, `${p.sameLabel}: ${money(sS)}`) : ''}
+      ${diffBlock(sCur, sP, p.same ? `За ${p.wholeLabel}` : `Проти: ${p.prevName}`, `${p.prevName}: ${money(sP)}`)}`}
+    </div>
     <div class="card span2-m"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
-    <div class="card span2-m"><div class="label">${ICONS.star}Найкращі дні місяця</div><div class="list-days">${best.length ? best.map(b => `<div><span>${dmy(b.date)}</span><b>${money(b.amount)}</b></div>`).join('') : '<div class="sub">ще немає продажів</div>'}</div></div>
+    <div class="card span2-m"><div class="label">${ICONS.star}${perLabel(p, 'Найкращі дні місяця', 'Найкращі дні року')}</div><div class="list-days">${best.length ? best.map(b => `<div><span>${dmy(b.date)}</span><b>${money(b.amount)}</b></div>`).join('') : '<div class="sub">ще немає продажів</div>'}</div></div>
   </div>
   <div class="card">
     <div class="section-title"><h2>Продажі акаунта</h2><span class="sub">${totalAll ? `${Math.round(sCur / totalAll * 100)}% усіх продажів` : ''}</span></div>
-    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Речей</th><th>Сума<br><span style="font-weight:400">наростаючим</span></th></tr></thead><tbody>
-      ${rows.map(s => `<tr class="tap" data-id="${s.id}"><td>${dmy(s.date)} <span class="muted">${DOW[new Date(s.date + 'T12:00').getDay()]}</span></td><td>${s.items}</td><td><b>${money(s.amount)}</b><div class="sub">${money(runMap[s.id])}</div></td></tr>`).join('')}
-    </tbody></table></div>` : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : 'У цьому місяці ще немає продажів.<br>Натисніть «+», щоб додати.'}</div>`}
+    ${sorted.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Речей</th><th>Сума<br><span style="font-weight:400">наростаючим за місяць</span></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+      : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : `За ${p.kind === 'year' ? 'цей рік' : 'цей місяць'} ще немає продажів.<br>Натисніть «+», щоб додати.`}</div>`}
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
 }
 
 function viewPanel() {
   setTitle('Панель');
-  const ym = S.month, prevYM = shiftYM(ym, -1), year = ym.slice(0, 4);
-  const all = sales(), cur = inYM(all, ym), prev = inYM(all, prevYM);
-  const sCur = sum(cur, x => x.amount), sPrev = sum(prev, x => x.amount);
-  const iCur = sum(cur, x => x.items);
-  const eCur = sum(inYM(S.data.expenses, ym), x => x.amount), ePrev = sum(inYM(S.data.expenses, prevYM), x => x.amount);
-  const mCur = sum(inYM(S.data.work, ym), x => x.minutes), mPrev = sum(inYM(S.data.work, prevYM), x => x.minutes);
-  const profit = r2(sCur - eCur), profitPrev = r2(sPrev - ePrev);
-  const hourly = mCur ? profit / (mCur / 60) : 0, hourlyPrev = mPrev ? profitPrev / (mPrev / 60) : 0;
-  const goal = +S.data.settings.goal || 0, goalP = goal ? Math.min(100, sCur / goal * 100) : 0;
-  const isNow = ym === ymOf(todayISO()), dayNow = new Date().getDate();
-  const forecast = isNow && dayNow ? sCur / dayNow * daysIn(ym) : sCur;
+  const p = P(), year = p.year, all = sales(), cur = forP(all, p);
+  const S_ = (a, b) => sum(inRange(all, a, b), x => x.amount);
+  const E_ = (a, b) => sum(inRange(S.data.expenses, a, b), x => x.amount);
+  const M_ = (a, b) => sum(inRange(S.data.work, a, b), x => x.minutes);
+  const PR_ = (a, b) => r2(S_(a, b) - E_(a, b));
+  const H_ = (a, b) => { const m = M_(a, b); return m ? PR_(a, b) / (m / 60) : 0; };
+  const sCur = sum(cur, x => x.amount), iCur = sum(cur, x => x.items);
+  const eCur = E_(p.start, p.end), mCur = M_(p.start, p.end), profit = r2(sCur - eCur), hourly = mCur ? profit / (mCur / 60) : 0;
+  const goal = (+S.data.settings.goal || 0) * (p.kind === 'year' ? 12 : 1), goalP = goal ? Math.min(100, sCur / goal * 100) : 0;
+  const today = todayISO();
+  let forecast = sCur;
+  if (p.ongoing) {
+    const t0 = new Date(p.start + 'T12:00'), t1 = new Date(p.end + 'T12:00'), tn = new Date(today + 'T12:00');
+    const done = Math.round((tn - t0) / 864e5) + 1, total = Math.round((t1 - t0) / 864e5) + 1;
+    forecast = sCur / done * total;
+  }
   const bestDay = byDay(cur).sort((a, b) => b.amount - a.amount)[0];
   const bm = Object.entries(byMonth(all)).sort((a, b) => b[1] - a[1])[0];
-  const accs = S.data.accounts.map((a, i) => { const x = inYM(sales(a.id), ym); return { ...a, s: sum(x, y => y.amount), n: sum(x, y => y.items), c: ACC_COLORS[i % ACC_COLORS.length] }; });
-  // monthly table for the selected year (+ months with data)
-  const months = []; for (let m = 1; m <= 12; m++) months.push(`${year}-${String(m).padStart(2, '0')}`);
-  const mrows = months.map((k, i) => {
+  const accs = S.data.accounts.map((a, i) => { const x = forP(sales(a.id), p); return { ...a, s: sum(x, y => y.amount), n: sum(x, y => y.items), c: ACC_COLORS[i % ACC_COLORS.length] }; });
+  const months = []; for (let m = 1; m <= 12; m++) months.push(`${year}-${pad2(m)}`);
+  const mrows = months.map(k => {
     const sl = inYM(all, k), s = sum(sl, x => x.amount), n = sum(sl, x => x.items), e = sum(inYM(S.data.expenses, k), x => x.amount), w = sum(inYM(S.data.work, k), x => x.minutes);
     return { k, s, n, e, p: r2(s - e), w };
   });
-  const prevYear = String(+year - 1), hasPrevYear = all.some(s => s.date.startsWith(prevYear));
 
   $('#view').innerHTML = `
   <div class="grid g3">
-    <div class="card dark span2-m">${`<div class="label">${ICONS.cal}Продажі за місяць</div><div class="big">${money(sCur)}</div>${pct(sCur, sPrev)}<div class="sub">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div>`}</div>
-    ${kpi('chart', `Продажі за ${year} рік`, money(ytd(all, ym)), pct(ytd(all, ym), ytdPrev(all, ym)))}
-    ${kpi('wallet', 'Витрати за місяць', money(eCur), pct(eCur, ePrev).replace('up', 'tmp').replace('down', 'up').replace('tmp', 'down'))}
-    ${kpi('coin', 'Чистий прибуток', money(profit), pct(profit, profitPrev))}
-    ${kpi('clock', 'Вартість години', mCur ? money(hourly) : '—', `${mCur ? pct(hourly, hourlyPrev) : ''}<div class="sub">${hmShort(mCur)} год роботи (приблизно)</div>`)}
-    <div class="card span2-m"><div class="label">${ICONS.target}Ціль на місяць</div><div class="mid">Виконано ${Math.round(goalP)}%</div>
+    <div class="card dark span2-m"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div></div>
+    ${kpi('chart', 'Продажі за весь час', money(sum(all, x => x.amount)), `<div class="sub">${sum(all, x => x.items)} речей · усі акаунти</div>`)}
+    ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(eCur), cmp(eCur, E_, p, true))}
+    ${kpi('coin', 'Чистий прибуток', money(profit), cmp(profit, PR_, p))}
+    ${kpi('clock', 'Вартість години', mCur ? money(hourly) : '—', `${mCur ? cmp(hourly, H_, p) : ''}<div class="sub">${hmShort(mCur)} год роботи (приблизно)</div>`)}
+    <div class="card span2-m"><div class="label">${ICONS.target}${perLabel(p, 'Ціль на місяць', 'Ціль на рік')}</div><div class="mid">Виконано ${Math.round(goalP)}%</div>
       <div class="progress"><i style="width:${goalP}%"></i></div>
       <div class="goal-row"><span>${money(sCur)}</span><span>з ${money(goal)}</span></div>
-      <div class="sub" style="margin-top:8px">${ICONS.trend.replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px"')} Прогноз на кінець місяця: <b style="color:var(--ink)">${money(forecast)}</b></div></div>
+      <div class="sub" style="margin-top:8px">${ICONS.trend.replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px"')} Прогноз на кінець ${p.kind === 'year' ? 'року' : 'місяця'}: <b style="color:var(--ink)">${money(forecast)}</b></div></div>
   </div>
   <div class="card">
     <div class="section-title"><h2>Продажі по місяцях</h2><span class="sub">${year}</span></div>
     <div class="chart-box"><canvas id="cMonths"></canvas></div>
   </div>
   <div class="grid g3">
-    <div class="card span2"><div class="section-title"><h2>Ріст суми за місяць</h2><span class="sub">${MONTHS[+ym.slice(5) - 1].toLowerCase()} vs ${MONTHS[+prevYM.slice(5) - 1].toLowerCase()}</span></div><div class="chart-box small"><canvas id="cRun"></canvas></div></div>
-    <div class="card span2-m"><div class="section-title"><h2>Акаунти</h2><span class="sub">${monthName(ym)}</span></div>
+    <div class="card span2"><div class="section-title"><h2>${p.kind === 'year' ? 'Ріст суми за рік' : 'Ріст суми за місяць'}</h2><span class="sub">${p.kind === 'year' ? `${year} vs ${year - 1}` : `${lc(MONTHS[+p.ym.slice(5) - 1])} vs ${lc(MONTHS[+p.prev.start.slice(5, 7) - 1])}`}</span></div><div class="chart-box small"><canvas id="cRun"></canvas></div></div>
+    <div class="card span2-m"><div class="section-title"><h2>Акаунти</h2><span class="sub">${p.name}</span></div>
       ${sCur ? `<div class="chart-box small"><canvas id="cAcc"></canvas></div>` : ''}
       ${accs.map(a => `<a href="#acc:${a.id}" style="color:inherit;text-decoration:none"><div class="acc-row"><span class="dot" style="background:${a.c}"></span><span class="name">${esc(a.id)}<small>${a.n} речей${a.status === 'archive' ? ' · архів' : ''}</small></span><b>${money(a.s)}</b></div></a>`).join('')}
       <div class="acc-row"><span class="dot" style="background:transparent"></span><span class="name">Разом</span><b>${money(sCur)}</b></div>
     </div>
   </div>
-  <div class="grid g3">
-    <div class="card"><div class="label">${ICONS.star}Найкращий день місяця</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>
+  <div class="grid">
+    <div class="card"><div class="label">${ICONS.star}${perLabel(p, 'Найкращий день місяця', 'Найкращий день року')}</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>
     <div class="card"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
-    <div class="card span2-m"><div class="label">${ICONS.swap}${monthName(ym)} vs ${prevYear}</div>${hasPrevYear ? `${diffHtml(sCur, sum(inYM(all, shiftYM(ym, -12)), x => x.amount))}<div class="sub">${monthName(shiftYM(ym, -12))}: ${money(sum(inYM(all, shiftYM(ym, -12)), x => x.amount))}</div>` : `<div class="mid flat">немає даних за ${prevYear}</div><div class="sub">з'явиться, коли додамо продажі ${prevYear} року</div>`}</div>
   </div>
   <div class="card">
     <div class="section-title"><h2>Підсумок по місяцях</h2><span class="sub">${year}</span></div>
     <div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Речей</th><th>Продажі</th><th>Витрати</th><th>Прибуток</th><th>Години</th><th>Δ</th></tr></thead><tbody>
-    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const p = mrows.find(x => x.k === shiftYM(m.k, -1)); const ps = p ? p.s : 0; return `<tr><td>${MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td><td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
+    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const pr = mrows.find(x => x.k === shiftYM(m.k, -1)); const ps = pr ? pr.s : 0; return `<tr><td>${MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td><td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
     </tbody></table></div>
   </div>`;
 
   const ink = cssVar('--ink'), muted = cssVar('--muted');
-  chart('cMonths', { type: 'bar', data: { labels: MONTHS_SHORT, datasets: [{ data: mrows.map(m => m.s), backgroundColor: mrows.map(m => m.k === ym ? muted : ink), borderRadius: 10, borderSkipped: false, maxBarThickness: 34 }] },
+  chart('cMonths', { type: 'bar', data: { labels: MONTHS_SHORT, datasets: [{ data: mrows.map(m => m.s), backgroundColor: mrows.map(m => p.kind === 'month' && m.k === p.ym ? muted : ink), borderRadius: 10, borderSkipped: false, maxBarThickness: 34 }] },
     options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => money(c.raw) } } }, scales: { x: { grid: { display: false }, border: { display: false } }, y: { ...gridOpts(), ticks: { callback: v => moneyShort(v) } } } } });
-  const runSeries = (k) => { const days = daysIn(k), byD = {}; inYM(all, k).forEach(s => { const d = +s.date.slice(8); byD[d] = (byD[d] || 0) + s.amount; }); let acc = 0; const out = []; const lim = k === ymOf(todayISO()) ? new Date().getDate() : days; for (let d = 1; d <= days; d++) { acc += byD[d] || 0; out.push(d <= lim ? r2(acc) : null); } return out; };
-  const nDays = Math.max(daysIn(ym), daysIn(prevYM));
-  chart('cRun', { type: 'line', data: { labels: Array.from({ length: nDays }, (_, i) => i + 1), datasets: [
-    { label: monthName(ym), data: runSeries(ym), borderColor: ink, backgroundColor: ink, tension: .3, pointRadius: 0, borderWidth: 2.5 },
-    { label: monthName(prevYM), data: runSeries(prevYM), borderColor: muted, borderDash: [5, 4], tension: .3, pointRadius: 0, borderWidth: 1.8 }] },
+  let labels, curSeries, prevSeries, curName, prevName;
+  if (p.kind === 'month') {
+    const series = k => { const days = daysIn(k), byD = {}; inYM(all, k).forEach(s => { const d = +s.date.slice(8); byD[d] = (byD[d] || 0) + s.amount; }); let a = 0; const out = []; const lim = k === ymOf(today) ? +today.slice(8) : days; for (let d = 1; d <= days; d++) { a += byD[d] || 0; out.push(d <= lim ? r2(a) : null); } return out; };
+    const pym = ymOf(p.prev.start), n = Math.max(daysIn(p.ym), daysIn(pym));
+    labels = Array.from({ length: n }, (_, i) => i + 1); curSeries = series(p.ym); prevSeries = series(pym); curName = monthName(p.ym); prevName = monthName(pym);
+  } else {
+    const series = y => { let a = 0; const out = []; for (let m = 1; m <= 12; m++) { const k = `${y}-${pad2(m)}`; a += sum(inYM(all, k), x => x.amount); out.push(k <= ymOf(today) ? r2(a) : null); } return out; };
+    labels = MONTHS_SHORT; curSeries = series(year); prevSeries = series(year - 1); curName = `${year}`; prevName = `${year - 1}`;
+  }
+  chart('cRun', { type: 'line', data: { labels, datasets: [
+    { label: curName, data: curSeries, borderColor: ink, backgroundColor: ink, tension: .3, pointRadius: 0, borderWidth: 2.5 },
+    { label: prevName, data: prevSeries, borderColor: muted, borderDash: [5, 4], tension: .3, pointRadius: 0, borderWidth: 1.8 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { boxWidth: 10, boxHeight: 10 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 8 } }, y: { ...gridOpts(), ticks: { callback: v => moneyShort(v) } } } } });
   if (sCur) chart('cAcc', { type: 'doughnut', data: { labels: accs.map(a => a.id), datasets: [{ data: accs.map(a => a.s), backgroundColor: accs.map(a => a.c), borderWidth: 0 }] },
     options: { maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.label}: ${money(c.raw)}` } } } } });
@@ -294,43 +373,55 @@ function viewPanel() {
 
 function viewExpenses() {
   setTitle('Витрати');
-  const ym = S.month, ex = S.data.expenses, cur = inYM(ex, ym), prev = inYM(ex, shiftYM(ym, -1));
-  const y = ym.slice(0, 4), yr = ex.filter(e => e.date.startsWith(y));
+  const st = $('#pageStatus'); st.textContent = 'спільні для всіх акаунтів'; st.className = 'status archive';
+  const p = P(), ex = S.data.expenses, cur = forP(ex, p);
+  const E_ = (a, b) => sum(inRange(ex, a, b), e => e.amount), N_ = (a, b) => inRange(ex, a, b).length;
   const sCur = sum(cur, e => e.amount);
   const rows = [...cur].sort((a, b) => b.date.localeCompare(a.date));
+  let body = '', lm = null;
+  rows.forEach(e => {
+    const m = ymOf(e.date);
+    if (p.kind === 'year' && m !== lm) { body += sepRow(m, 3, money(sum(inYM(cur, m), x => x.amount))); lm = m; }
+    body += `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${dowOf(e.date)}</span></td><td class="muted">${esc(e.category)}</td><td><b>${money(e.amount)}</b></td></tr>${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`;
+  });
   $('#view').innerHTML = `
   <div class="grid g4">
-    ${kpi('wallet', 'Витрати за місяць', money(sCur), pct(sCur, sum(prev, e => e.amount)).replace('up', 'tmp').replace('down', 'up').replace('tmp', 'down'), 'dark')}
-    ${kpi('chart', `Витрати за ${y} рік`, money(sum(yr, e => e.amount)))}
-    ${kpi('box', 'Закупок за місяць', cur.length)}
+    ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(sCur), cmp(sCur, E_, p, true), 'dark')}
+    ${kpi('chart', 'Витрати за весь час', money(sum(ex, e => e.amount)))}
+    ${kpi('box', perLabel(p, 'Закупок за місяць', 'Закупок за рік'), cur.length, cmp(cur.length, N_, p, true))}
     ${kpi('star', 'Середньо за закупку', money(cur.length ? sCur / cur.length : 0))}
   </div>
   <div class="card">
-    <div class="section-title"><h2>Записи</h2><span class="sub">${monthName(ym)}</span></div>
-    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>На що</th><th>Сума</th></tr></thead><tbody>
-    ${rows.map(e => `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${DOW[new Date(e.date + 'T12:00').getDay()]}</span></td><td class="muted">${esc(e.category)}</td><td><b>${money(e.amount)}</b></td></tr>${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`).join('')}
-    </tbody></table></div>` : '<div class="empty">У цьому місяці витрат немає.<br>Натисніть «+», щоб додати.</div>'}
+    <div class="section-title"><h2>Записи</h2><span class="sub">${p.name}</span></div>
+    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>На що</th><th>Сума</th></tr></thead><tbody>${body}</tbody></table></div>`
+      : `<div class="empty">За ${p.kind === 'year' ? 'цей рік' : 'цей місяць'} витрат немає.<br>Натисніть «+», щоб додати.</div>`}
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => expenseForm(ex.find(e => e.id === tr.dataset.id)));
 }
 
 function viewWork() {
   setTitle('Час роботи');
-  const ym = S.month, w = S.data.work, cur = inYM(w, ym), prev = inYM(w, shiftYM(ym, -1));
+  const p = P(), w = S.data.work, cur = forP(w, p);
+  const M_ = (a, b) => sum(inRange(w, a, b), x => x.minutes);
   const mCur = sum(cur, x => x.minutes), days = cur.filter(x => x.minutes > 0).length;
   const rows = [...cur].sort((a, b) => b.date.localeCompare(a.date));
+  let body = '', lm = null;
+  rows.forEach(x => {
+    const m = ymOf(x.date);
+    if (p.kind === 'year' && m !== lm) { body += sepRow(m, 3, hmShort(sum(inYM(cur, m), y => y.minutes)) + ' год'); lm = m; }
+    body += `<tr class="tap" data-id="${x.id}"><td>${dmy(x.date)} <span class="muted">${dowOf(x.date)}</span></td><td><b>${x.dayoff ? '—' : hmShort(x.minutes)}</b></td><td class="muted">${x.dayoff ? 'вихідний' : ''}</td></tr>${x.note ? `<tr class="tap" data-id="${x.id}"><td colspan="3" class="note">${esc(x.note)}</td></tr>` : ''}`;
+  });
   $('#view').innerHTML = `
   <div class="grid g4">
-    ${kpi('clock', 'Години за місяць', hmShort(mCur), pct(mCur, sum(prev, x => x.minutes)), 'dark')}
+    ${kpi('clock', perLabel(p, 'Години за місяць', 'Години за рік'), hmShort(mCur), cmp(mCur, M_, p), 'dark')}
     ${kpi('chart', 'Всього годин', hmShort(sum(w, x => x.minutes)), '<div class="sub">години приблизні</div>')}
     ${kpi('cal', 'Робочих днів', days, `<div class="sub">вихідних: ${cur.filter(x => x.dayoff).length}</div>`)}
-    ${kpi('star', 'Середньо за день', hmShort(days ? mCur / days : 0))}
+    ${kpi('star', 'Середньо за робочий день', hmShort(days ? mCur / days : 0))}
   </div>
   <div class="card">
-    <div class="section-title"><h2>Записи</h2><span class="sub">${monthName(ym)}</span></div>
-    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Час</th><th></th></tr></thead><tbody>
-    ${rows.map(x => `<tr class="tap" data-id="${x.id}"><td>${dmy(x.date)} <span class="muted">${DOW[new Date(x.date + 'T12:00').getDay()]}</span></td><td><b>${x.dayoff ? '—' : hmShort(x.minutes)}</b></td><td class="muted">${x.dayoff ? 'вихідний' : ''}</td></tr>${x.note ? `<tr class="tap" data-id="${x.id}"><td colspan="3" class="note">${esc(x.note)}</td></tr>` : ''}`).join('')}
-    </tbody></table></div>` : '<div class="empty">У цьому місяці записів немає.<br>Натисніть «+», щоб додати.</div>'}
+    <div class="section-title"><h2>Записи</h2><span class="sub">${p.name}</span></div>
+    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Час</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`
+      : `<div class="empty">За ${p.kind === 'year' ? 'цей рік' : 'цей місяць'} записів немає.<br>Натисніть «+», щоб додати.</div>`}
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => workForm(w.find(x => x.id === tr.dataset.id)));
 }
@@ -401,7 +492,7 @@ function saleForm(acc, s) {
       closeSheet();
       if (edit) await save(`Змінено продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł (було ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł)`, d => Object.assign(d.sales.find(x => x.id === s.id), { date, items, amount }));
       else await save(`Продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł`, d => d.sales.push({ id: uid('s'), account: acc, date, items, amount }));
-      S.month = ymOf(date); render();
+      focusDate(date); render();
     };
     if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити продаж ${dmy(s.date)} на ${money(s.amount)}?`)) return; closeSheet(); await save(`Видалено продаж ${acc} ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł`, d => { d.sales = d.sales.filter(x => x.id !== s.id); }); };
   });
@@ -425,7 +516,7 @@ function expenseForm(e) {
       closeSheet();
       if (edit) await save(`Змінено витрату ${dmy(date)}: ${amount} zł (${category})`, d => Object.assign(d.expenses.find(x => x.id === e.id), { date, amount, category, note }));
       else await save(`Витрата ${dmy(date)}: ${amount} zł (${category})`, d => d.expenses.push({ id: uid('e'), date, category, amount, note }));
-      S.month = ymOf(date); render();
+      focusDate(date); render();
     };
     if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити витрату ${dmy(e.date)} на ${money(e.amount)}?`)) return; closeSheet(); await save(`Видалено витрату ${dmy(e.date)}: ${e.amount} zł`, d => { d.expenses = d.expenses.filter(x => x.id !== e.id); }); };
   });
@@ -452,7 +543,7 @@ function workForm(w) {
       closeSheet();
       if (edit) await save(`Змінено час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => Object.assign(d.work.find(x => x.id === w.id), { date, minutes, dayoff: off, note }));
       else await save(`Час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => d.work.push({ id: uid('w'), date, minutes, dayoff: off, note }));
-      S.month = ymOf(date); render();
+      focusDate(date); render();
     };
     if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити запис за ${dmy(w.date)}?`)) return; closeSheet(); await save(`Видалено час роботи ${dmy(w.date)}`, d => { d.work = d.work.filter(x => x.id !== w.id); }); };
   });
