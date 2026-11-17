@@ -21,6 +21,8 @@ const ICONS = {
   target:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>',
   trend:'<svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>',
   swap:'<svg viewBox="0 0 24 24"><path d="M7 7h13l-4-4M17 17H4l4 4"/></svg>',
+  plus:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  check:'<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   coin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/></svg>'
 };
 
@@ -273,10 +275,10 @@ function viewAccount(id) {
     ${kpi('star', 'Середній чек', money(avg), cmp(avg, A_, p))}
   </div>
   <div class="grid g3">
-    <div class="card span2-m"><div class="label">${ICONS.swap}${p.cmpTitle}</div>
+    <div class="card span2-m"><div class="card-head"><div class="label">${ICONS.swap}${p.cmpTitle}</div>${p.same && sP ? `<button class="mini-btn" id="cmpMode" aria-label="Що показувати">${ICONS.plus}</button>` : ''}</div>
       ${!sP ? `<div class="mid flat">немає даних</div><div class="sub">за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} продажів не записано</div>` : `
-      ${p.same ? diffBlock(sCur, sS, `За той самий час (${p.sameLabel})`, `${p.sameLabel}: ${money(sS)}`) : ''}
-      ${diffBlock(sCur, sP, p.same ? `За ${p.wholeLabel}` : `Проти: ${p.prevName}`, `${p.prevName}: ${money(sP)}`)}`}
+      ${p.same && cmpMode() !== 'whole' ? diffBlock(sCur, sS, `За той самий час (${p.sameLabel})`, `${p.sameLabel}: ${money(sS)}`) : ''}
+      ${!p.same || cmpMode() !== 'same' ? diffBlock(sCur, sP, p.same ? `За ${p.wholeLabel}` : `Проти: ${p.prevName}`, `${p.prevName}: ${money(sP)}`) : ''}`}
     </div>
     <div class="card span2-m"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>
     <div class="card span2-m"><div class="label">${ICONS.star}${perLabel(p, 'Найкращі дні місяця', 'Найкращі дні року')}</div><div class="list-days">${best.length ? best.map(b => `<div><span>${dmy(b.date)}</span><b>${money(b.amount)}</b></div>`).join('') : '<div class="sub">ще немає продажів</div>'}</div></div>
@@ -287,6 +289,20 @@ function viewAccount(id) {
       : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : `За ${p.kind === 'year' ? 'цей рік' : 'цей місяць'} ще немає продажів.<br>Натисніть «+», щоб додати.`}</div>`}
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
+  if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
+}
+const cmpMode = () => ['same', 'whole', 'both'].includes(store.get('vs_cmpmode')) ? store.get('vs_cmpmode') : 'both';
+function cmpModeSheet(p) {
+  const cur = cmpMode();
+  const opt = (v, t, d) => `<button class="opt ${cur === v ? 'on' : ''}" data-v="${v}"><span><b>${t}</b><small>${d}</small></span>${cur === v ? ICONS.check : ''}</button>`;
+  openSheet(`<h3>Що показувати в порівнянні</h3>
+    ${opt('same', 'За той самий час', `наприклад, ${p.sameLabel}`)}
+    ${opt('whole', `За ${p.kind === 'year' ? 'весь минулий рік' : 'весь минулий місяць'}`, `наприклад, ${p.wholeLabel}`)}
+    ${opt('both', 'Обидва варіанти', 'один під одним')}
+    <button class="btn ghost" id="cancel">Закрити</button>`, el => {
+    el.querySelector('#cancel').onclick = closeSheet;
+    el.querySelectorAll('.opt').forEach(b => b.onclick = () => { store.set('vs_cmpmode', b.dataset.v); closeSheet(); render(); });
+  });
 }
 
 function viewPanel() {

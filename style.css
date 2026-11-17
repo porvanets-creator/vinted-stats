@@ -153,3 +153,10 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .diff{padding:8px 0;border-bottom:1px solid var(--line)}
 .diff:last-child{border-bottom:0;padding-bottom:0}
 .table tr.sep td{background:var(--soft);font-weight:600;font-size:13px;text-align:left;padding:8px 10px}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.mini-btn{border:0;background:var(--soft);color:var(--ink);width:32px;height:32px;border-radius:10px;display:grid;place-items:center;cursor:pointer;flex:none;margin:-4px -4px 0 0}
+.mini-btn svg{width:18px;height:18px}
+.opt{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border:1px solid var(--line);background:var(--soft);border-radius:16px;padding:13px 14px;margin-bottom:8px;cursor:pointer}
+.opt.on{border-color:var(--ink)}
+.opt b{display:block;font-size:15px}
+.opt small{color:var(--muted);font-size:12.5px}
