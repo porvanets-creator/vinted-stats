@@ -198,8 +198,9 @@ function cmpLine(cur, prev, label, invert) {
 function cmp(cur, f, p, invert) {
   if (!f(p.prev.start, p.prev.end)) return `<div class="cmps"><div class="cmp"><span class="chg flat">—</span><span class="sub">немає даних за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} для порівняння</span></div></div>`;
   let h = '';
-  if (p.same) h += cmpLine(cur, f(p.same.start, p.same.end), `vs ${p.sameLabel}`, invert);
-  h += cmpLine(cur, f(p.prev.start, p.prev.end), `vs ${p.wholeLabel}`, invert);
+  const mode = cmpMode();
+  if (p.same && mode !== 'whole') h += cmpLine(cur, f(p.same.start, p.same.end), `vs ${p.sameLabel}`, invert);
+  if (!p.same || mode !== 'same') h += cmpLine(cur, f(p.prev.start, p.prev.end), `vs ${p.wholeLabel}`, invert);
   return `<div class="cmps">${h}</div>`;
 }
 function diffBlock(cur, prev, title, sub) {
@@ -275,7 +276,7 @@ function viewAccount(id) {
     ${kpi('star', 'Середній чек', money(avg), cmp(avg, A_, p))}
   </div>
   <div class="grid g3">
-    <div class="card span2-m"><div class="card-head"><div class="label">${ICONS.swap}${p.cmpTitle}</div>${p.same && sP ? `<button class="mini-btn" id="cmpMode" aria-label="Що показувати">${ICONS.plus}</button>` : ''}</div>
+    <div class="card span2-m"><div class="card-head"><div class="label">${ICONS.swap}${p.cmpTitle}</div>${p.same ? `<button class="mini-btn" id="cmpMode" aria-label="Що показувати">${ICONS.plus}</button>` : ''}</div>
       ${!sP ? `<div class="mid flat">немає даних</div><div class="sub">за ${p.kind === 'year' ? p.prevName : lc(p.prevName)} продажів не записано</div>` : `
       ${p.same && cmpMode() !== 'whole' ? diffBlock(sCur, sS, `За той самий час (${p.sameLabel})`, `${p.sameLabel}: ${money(sS)}`) : ''}
       ${!p.same || cmpMode() !== 'same' ? diffBlock(sCur, sP, p.same ? `За ${p.wholeLabel}` : `Проти: ${p.prevName}`, `${p.prevName}: ${money(sP)}`) : ''}`}
@@ -295,7 +296,7 @@ const cmpMode = () => ['same', 'whole', 'both'].includes(store.get('vs_cmpmode')
 function cmpModeSheet(p) {
   const cur = cmpMode();
   const opt = (v, t, d) => `<button class="opt ${cur === v ? 'on' : ''}" data-v="${v}"><span><b>${t}</b><small>${d}</small></span>${cur === v ? ICONS.check : ''}</button>`;
-  openSheet(`<h3>Що показувати в порівнянні</h3>
+  openSheet(`<h3>Що показувати в порівнянні</h3><div class="src">Діє на всі картки на всіх сторінках</div>
     ${opt('same', 'За той самий час', `наприклад, ${p.sameLabel}`)}
     ${opt('whole', `За ${p.kind === 'year' ? 'весь минулий рік' : 'весь минулий місяць'}`, `наприклад, ${p.wholeLabel}`)}
     ${opt('both', 'Обидва варіанти', 'один під одним')}
@@ -334,7 +335,7 @@ function viewPanel() {
 
   $('#view').innerHTML = `
   <div class="grid g3">
-    <div class="card dark span2-m"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div></div>
+    <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей · середній чек ${money(iCur ? sCur / iCur : 0)}</div></div>
     ${kpi('chart', 'Продажі за весь час', money(sum(all, x => x.amount)), `<div class="sub">${sum(all, x => x.items)} речей · усі акаунти</div>`)}
     ${kpi('wallet', perLabel(p, 'Витрати за місяць', 'Витрати за рік'), money(eCur), cmp(eCur, E_, p, true))}
     ${kpi('coin', 'Чистий прибуток', money(profit), cmp(profit, PR_, p))}
@@ -383,6 +384,7 @@ function viewPanel() {
     { label: curName, data: curSeries, borderColor: ink, backgroundColor: ink, tension: .3, pointRadius: 0, borderWidth: 2.5 },
     { label: prevName, data: prevSeries, borderColor: muted, borderDash: [5, 4], tension: .3, pointRadius: 0, borderWidth: 1.8 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { boxWidth: 10, boxHeight: 10 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 8 } }, y: { ...gridOpts(), ticks: { callback: v => moneyShort(v) } } } } });
+  if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
   if (sCur) chart('cAcc', { type: 'doughnut', data: { labels: accs.map(a => a.id), datasets: [{ data: accs.map(a => a.s), backgroundColor: accs.map(a => a.c), borderWidth: 0 }] },
     options: { maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.label}: ${money(c.raw)}` } } } } });
 }

@@ -160,3 +160,4 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .opt.on{border-color:var(--ink)}
 .opt b{display:block;font-size:15px}
 .opt small{color:var(--muted);font-size:12.5px}
+.card.dark .mini-btn{background:rgba(127,127,127,.25);color:var(--dark-ink)}
