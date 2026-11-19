@@ -216,3 +216,10 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 
 .brand{font:700 26px/1.05 "Cinzel","Trajan Pro",Georgia,serif;letter-spacing:.08em;text-transform:uppercase;background:linear-gradient(180deg,#ffffff 0%,#c9c9c9 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 .brand::after{content:"";display:block;width:38px;height:2px;margin-top:12px;background:#5a5a5a;border-radius:2px}
+
+.tax-month{padding:12px 0;border-top:1px solid var(--line)}
+.section-title + .tax-month{border-top:0}
+.tm-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
+.tm-row{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:2px}
+.pill{font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;white-space:nowrap;background:var(--soft);color:var(--muted)}
+.pill.ok{color:var(--green)} .pill.bad{color:var(--red)} .pill.wait{color:var(--ink)} .pill.muted{color:var(--muted)}

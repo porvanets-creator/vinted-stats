@@ -396,6 +396,19 @@ function viewTaxes() {
     const dl = shiftYM(next.m, 1), late = today > `${dl}-20`;
     nextHtml = `<div class="mid">${monthName(next.m)}</div><div class="chg ${late ? 'down' : 'flat'}">${money(next.dueR)}</div><div class="sub">до 20.${dl.slice(5, 7)}.${dl.slice(0, 4)}${late ? ' · <span class="down">прострочено</span>' : ''}</div>`;
   }
+  const closed = rows.filter(x => !x.nodata && !x.ongoing);
+  const leftParts = closed.map(x => ({ m: x.m, v: r2(Math.max(0, x.dueR - x.paid)) })).filter(x => x.v > 0);
+  const leftTotal = sum(leftParts, x => x.v), over = sum(closed, x => Math.max(0, x.paid - x.dueR));
+  const leftHtml = `<div class="label">${ICONS.swap}Залишилось сплатити</div>
+    ${leftTotal ? `<div class="big down">${money(leftTotal)}</div><div class="sub">${leftParts.map(x => `${MONTHS[+x.m.slice(5) - 1]} ${money(x.v)}`).join(' · ')}</div>` : '<div class="big up">усе сплачено</div>'}
+    ${over ? `<div class="sub up">переплата ${money(over)}</div>` : ''}`;
+  const pill = x => {
+    if (x.ongoing) return '<span class="pill muted">Триває</span>';
+    if (x.nodata) return '<span class="pill muted">немає даних</span>';
+    if (x.hasPaid) return x.paid >= x.dueR ? '<span class="pill ok">✓ Сплачено</span>' : `<span class="pill bad">Недоплата ${money(x.dueR - x.paid)}</span>`;
+    const dl = shiftYM(x.m, 1);
+    return today > `${dl}-20` ? '<span class="pill bad">Не сплачено</span>' : `<span class="pill wait">До сплати до 20.${dl.slice(5, 7)}</span>`;
+  };
   const diffCls = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
   const diffTxt = v => v === 0 ? 'сплачено' : `${v > 0 ? '+' : '−'}${money(Math.abs(v))}`;
   const list = (type, empty) => {
@@ -408,16 +421,17 @@ function viewTaxes() {
   $('#view').innerHTML = `
   <div class="grid g3">
     ${kpi('coin', 'Податок за рік', money(dueYear), `<div class="sub">сплачено ${money(paidYear)}</div>`, 'dark')}
-    <div class="card"><div class="label">${ICONS.swap}Недоплата / переплата</div><div class="big ${diffCls(diffYear)}">${diffTxt(diffYear)}</div><div class="sub">за ${year} рік</div></div>
+    <div class="card">${leftHtml}</div>
     <div class="card span2-m"><div class="label">${ICONS.cal}Наступний платіж</div>${nextHtml}</div>
   </div>
   ${tax.start ? `<div class="sub" style="margin:-4px 4px 12px">Облік податку з ${MONTHS_GEN[+tax.start.slice(5) - 1]} ${tax.start.slice(0, 4)} — з цього місяця зареєстрована діяльність (JDG).</div>` : firstPaid !== '0000-00' ? `<div class="sub" style="margin:-4px 4px 12px">рахується з ${monthName(firstPaid)} — раніше немає даних про оплату</div>` : ''}
   <div class="card">
     <div class="section-title"><h2>По місяцях</h2><span class="sub">ryczałt ${r2(rate * 100)}%</span></div>
-    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Дохід</th><th>${r2(rate * 100)}%</th><th>До сплати</th><th>Сплачено</th><th>Різниця</th></tr></thead><tbody>${rows.map(x => `
-      <tr><td>${monthName(x.m)}</td><td>${money(x.income)}</td><td>${money(x.due)}</td><td><b>${money(x.dueR)}</b></td>${x.nodata ? '<td colspan="2" class="muted">немає даних</td>' : `<td>${x.hasPaid ? money(x.paid) : '—'}</td><td class="${x.ongoing ? 'muted' : x.hasPaid ? diffCls(x.diff) : ''}">${x.ongoing ? 'триває' : x.hasPaid ? diffTxt(x.diff) : '—'}</td>`}</tr>
-      ${x.dates.length ? `<tr><td colspan="6" class="sub muted">сплачено: ${x.dates.map(dmy).join(', ')}</td></tr>` : ''}`).join('')}</tbody></table></div>`
-      : '<div class="empty">Ще немає даних за місяцями.</div>'}
+    ${rows.length ? rows.map(x => `<div class="tax-month">
+      <div class="tm-head"><b>${monthName(x.m)}</b>${pill(x)}</div>
+      <div class="tm-row sub"><span>Дохід ${money(x.income)}</span><span>${r2(rate * 100)}% → до сплати <b>${money(x.dueR)}</b></span></div>
+      ${x.hasPaid ? `<div class="tm-row sub"><span>Сплачено ${money(x.paid)} · ${x.dates.map(dmy).join(', ')}</span></div>` : ''}
+    </div>`).join('') : '<div class="empty">Ще немає даних за місяцями.</div>'}
   </div>
   <div class="card"><div class="section-title"><h2>ZUS (здоровотний внесок)</h2></div>${list('zus', 'платежів ще немає')}</div>
   <div class="card"><div class="section-title"><h2>Бухгалтерка</h2></div>${list('ksiegowa', 'платежів ще немає')}</div>
