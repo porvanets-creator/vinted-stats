@@ -380,14 +380,14 @@ function viewTaxes() {
   const ryc = pays.filter(p => p.type === 'ryczalt');
   const today = todayISO(), curYM = ymOf(today), year = today.slice(0, 4);
   const starts = [...Object.keys(rev).filter(k => rev[k] > 0), ...pays.map(p => p.period)].filter(Boolean).sort();
-  const firstPaid = ryc.map(p => p.period).filter(Boolean).sort()[0] || '0000-00';
+  const firstPaid = tax.start || ryc.map(p => p.period).filter(Boolean).sort()[0] || '0000-00';
   const months = [];
   if (starts.length) for (let m = starts[0]; m <= curYM; m = shiftYM(m, 1)) months.push(m);
   const rows = months.map(m => {
     const income = rev[m] || 0, due = income * rate, dueR = Math.round(due);
     const mp = ryc.filter(p => p.period === m), paid = sum(mp, p => p.amount);
     return { m, income, due, dueR, paid, hasPaid: mp.length > 0, dates: mp.map(p => p.date).sort(), diff: r2(paid - dueR), nodata: m < firstPaid, ongoing: m === curYM, pays: pays.filter(p => p.period === m).length };
-  }).filter(x => x.income > 0 || x.pays > 0).reverse();
+  }).filter(x => (x.income > 0 || x.pays > 0) && (!tax.start || x.m >= tax.start)).reverse();
   const yr = rows.filter(x => x.m.startsWith(year) && !x.nodata && !x.ongoing);
   const dueYear = sum(yr, x => x.dueR), paidYear = sum(yr, x => x.paid), diffYear = r2(paidYear - dueYear);
   const next = [...rows].reverse().find(x => x.income > 0 && !x.hasPaid && !x.nodata && !x.ongoing);
@@ -411,7 +411,7 @@ function viewTaxes() {
     <div class="card"><div class="label">${ICONS.swap}Недоплата / переплата</div><div class="big ${diffCls(diffYear)}">${diffTxt(diffYear)}</div><div class="sub">за ${year} рік</div></div>
     <div class="card span2-m"><div class="label">${ICONS.cal}Наступний платіж</div>${nextHtml}</div>
   </div>
-  ${firstPaid !== '0000-00' ? `<div class="sub" style="margin:-4px 4px 12px">рахується з ${monthName(firstPaid)} — раніше немає даних про оплату</div>` : ''}
+  ${tax.start ? `<div class="sub" style="margin:-4px 4px 12px">Облік податку з ${MONTHS_GEN[+tax.start.slice(5) - 1]} ${tax.start.slice(0, 4)} — з цього місяця зареєстрована діяльність (JDG).</div>` : firstPaid !== '0000-00' ? `<div class="sub" style="margin:-4px 4px 12px">рахується з ${monthName(firstPaid)} — раніше немає даних про оплату</div>` : ''}
   <div class="card">
     <div class="section-title"><h2>По місяцях</h2><span class="sub">ryczałt ${r2(rate * 100)}%</span></div>
     ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Дохід</th><th>${r2(rate * 100)}%</th><th>До сплати</th><th>Сплачено</th><th>Різниця</th></tr></thead><tbody>${rows.map(x => `
