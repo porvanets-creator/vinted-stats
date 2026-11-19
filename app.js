@@ -117,23 +117,24 @@ async function load() {
 }
 
 async function save(message, mutate) {
-  if (S.saving) return false;
+  if (S.saving) { toast('Зачекайте, зберігаю…'); return false; }
   const backup = JSON.stringify(S.data);
-  mutate(S.data);
+  try { mutate(S.data); }
+  catch (e) { S.data = JSON.parse(backup); toast('Не вдалося зберегти: помилка в даних. Спробуйте ще раз.', 4000); return false; }
   if (S.mode === 'offline') { S.data = JSON.parse(backup); toast('Немає інтернету — зберегти не вийде. Спробуйте пізніше.', 4000); return false; }
   if (S.mode !== 'github') { toast('Тестовий режим: зміни не зберігаються'); render(); return true; }
   S.saving = true; toast('Зберігаю…', 10000);
   try {
     const body = { message, content: b64enc(JSON.stringify(S.data, null, 1)), sha: S.sha, branch: GH.branch };
     const r = await fetch(ghUrl(), { method: 'PUT', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (r.status === 409 || r.status === 422) { S.data = JSON.parse(backup); await load(); render(); toast('Дані змінились на іншому пристрої. Оновив — повторіть, будь ласка.', 4000); return false; }
-    if (!r.ok) throw new Error(r.status);
+    if (r.status === 409) { S.data = JSON.parse(backup); try { await load(); } catch (_) {} render(); toast('Дані змінились на іншому пристрої. Оновив — повторіть, будь ласка.', 4000); return false; }
+    if (!r.ok) { const er = new Error('http'); er.status = r.status; throw er; }
     const j = await r.json(); S.sha = j.content.sha;
     store.set('vs_cache', JSON.stringify(S.data));
     toast('Збережено ✓'); render(); return true;
   } catch (e) {
     S.data = JSON.parse(backup); render();
-    toast('Не вдалося зберегти. Перевірте інтернет і спробуйте ще раз.', 4000); return false;
+    toast(e && e.status ? `Не вдалося зберегти (код ${e.status})` : 'Не вдалося зберегти. Перевірте інтернет і спробуйте ще раз.', 4000); return false;
   } finally { S.saving = false; }
 }
 
@@ -181,6 +182,7 @@ function renderNav() {
     ${sw('bestd', 'cal', 'Найкращі дні', show('bestd'))}
     ${sw('goal', 'target', 'Ціль', show('goal'))}
     ${sw('hourly', 'clock', 'Вартість години', show('hourly'))}
+    ${sw('buys', 'box', 'Закупки', show('buys'))}
     <hr>
     <a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
   $('#navFoot').querySelectorAll('[data-sw]').forEach(b => b.onclick = () => {
@@ -304,6 +306,15 @@ function kpi(icon, label, value, extra = '', cls = '') {
   return `<div class="card ${cls}"><div class="label">${ICONS[icon]}${label}</div><div class="big">${value}</div>${extra}</div>`;
 }
 const perLabel = (p, m, y) => p.kind === 'all' ? y.replace('за рік', 'за весь час').replace(' року', ' за весь час') : p.kind === 'year' ? y : m;
+const isBuyCat = c => String(c || '').startsWith('Закупка');
+function buyCard(p) {
+  const ex = S.data.expenses, buys = forP(ex, p).filter(e => isBuyCat(e.category)), withQ = buys.filter(e => e.qty > 0);
+  if (!withQ.length) return '';
+  const n = sum(withQ, e => e.qty), tot = sum(withQ, e => e.amount), first = ex.filter(e => e.qty > 0).map(e => e.date).sort()[0];
+  return `<div class="card"><div class="section-title"><h2>Закупки</h2><span class="sub">${esc(p.name)}</span></div>
+    <div class="list-days"><div><span>Куплено речей</span><b>${n}</b></div><div><span>Сума</span><b>${money(tot)}</b></div><div><span>Середня ціна речі</span><b>${money(tot / n)}</b></div></div>
+    ${withQ.length < buys.length ? `<div class="sub" style="margin-top:8px">рахуємо з ${dmy(first)} — у старих закупках кількість не вказана</div>` : ''}</div>`;
+}
 const perWord = p => p.kind === 'month' ? 'цей місяць' : p.kind === 'year' ? 'цей рік' : 'весь час';
 
 function viewAccount(id) {
@@ -350,7 +361,7 @@ function viewAccount(id) {
   <div class="card">
     <div class="section-title"><h2>Продажі акаунта</h2><span class="sub">${totalAll ? `${Math.round(sCur / totalAll * 100)}% усіх продажів` : ''}</span></div>
     ${sorted.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Дата</th><th>Речей</th><th>Сума<br><span style="font-weight:400">наростаючим за місяць</span></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
-      : `<div class="empty">${acc.status === 'archive' ? 'Дані цього акаунта ще не перенесені.' : `За ${perWord(p)} ще немає продажів.<br>Натисніть «+», щоб додати.`}</div>`}
+      : `<div class="empty">${acc.status === 'archive' && !all.length ? 'Дані цього акаунта ще не перенесені.' : `За ${perWord(p)} ще немає продажів.<br>Натисніть «+», щоб додати.`}</div>`}
   </div>`;
   if (acc.platform === 'ebay') {
     const promoE = forP(S.data.expenses, p).filter(e => e.account === id && e.category === 'Просування eBay');
@@ -422,7 +433,7 @@ function viewTaxes() {
   };
   $('#view').innerHTML = `
   <div class="grid g3">
-    ${kpi('coin', 'Податок за рік', money(dueYear), `<div class="sub">сплачено ${money(paidYear)}</div>`, 'dark')}
+    ${kpi('coin', `Податок за ${year} (закриті міс.)`, money(dueYear), `<div class="sub">сплачено ${money(paidYear)}</div>`, 'dark')}
     <div class="card">${leftHtml}</div>
     <div class="card span2-m"><div class="label">${ICONS.cal}Наступний платіж</div>${nextHtml}</div>
   </div>
@@ -465,8 +476,7 @@ function accountDataForm(acc) {
     el.querySelector('#cancel').onclick = closeSheet;
     el.querySelector('#ok').onclick = async () => {
       const email = el.querySelector('#fMail').value.trim(), phone = el.querySelector('#fPhone').value.trim(), bank = el.querySelector('#fBank').value.trim();
-      closeSheet();
-      await save(`Дані акаунта ${acc.id}`, d => Object.assign(d.accounts.find(a => a.id === acc.id), { email, phone, bank }));
+      if (await save(`Дані акаунта ${acc.id}`, d => Object.assign(d.accounts.find(a => a.id === acc.id), { email, phone, bank }))) closeSheet();
     };
   });
 }
@@ -498,7 +508,7 @@ function viewPanel() {
   const H_ = (a, b) => { const a2 = a < wFirst ? wFirst : a; const m = M_(a2, b); return m ? PR_(a2, b) / (m / 60) : 0; };
   const sCur = sum(cur, x => x.amount), iCur = sum(cur, x => x.items);
   const eCur = E_(p.start, p.end), mCur = M_(p.start, p.end), profit = r2(sCur - eCur), hourly = H_(p.start, p.end);
-  const goal = (+S.data.settings.goal || 0) * (p.kind === 'year' ? 12 : 1), goalP = goal ? Math.min(100, sCur / goal * 100) : 0;
+  const goal = (+S.data.settings.goal || 0) * (p.kind === 'year' ? 12 : 1), goalRaw = goal ? sCur / goal * 100 : 0, goalP = Math.min(100, goalRaw);
   const today = todayISO();
   let forecast = sCur;
   if (p.ongoing) {
@@ -529,11 +539,12 @@ function viewPanel() {
   <div class="grid g3">
     <div class="card dark span2-m"><div class="card-head"><div class="label">${ICONS.cal}${perLabel(p, 'Продажі за місяць', 'Продажі за рік')}</div>${p.same && !cmpOff() ? `<button class="mini-btn" id="cmpMode" aria-label="Що порівнювати">${ICONS.plus}</button>` : ''}</div><div class="big">${money(sCur)}</div>${cmp(sCur, S_, p)}<div class="sub" style="margin-top:6px">${iCur} речей</div></div>
     ${halves.map((h, i) => h(i === halves.length - 1 && halves.length % 2 ? 'span2-m' : '')).join('')}
-    ${p.kind === 'all' || !show('goal') ? '' : `<div class="card span2-m"><div class="label">${ICONS.target}${perLabel(p, 'Ціль на місяць', 'Ціль на рік')}</div><div class="mid">Виконано ${Math.round(goalP)}%</div>
+    ${p.kind === 'all' || !show('goal') ? '' : `<div class="card span2-m"><div class="label">${ICONS.target}${perLabel(p, 'Ціль на місяць', 'Ціль на рік')}</div><div class="mid">Виконано ${Math.round(goalRaw)}%</div>
       <div class="progress"><i style="width:${goalP}%"></i></div>
       <div class="goal-row"><span>${money(sCur)}</span><span>з ${money(goal)}</span></div>
       <div class="sub" style="margin-top:8px">${ICONS.trend.replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px"')} Прогноз на кінець ${p.kind === 'year' ? 'року' : 'місяця'}: <b style="color:var(--ink)">${money(forecast)}</b></div></div>`}
   </div>
+  ${show('buys') ? buyCard(p) : ''}
   ${show('bestd') || show('bestm') ? `<div class="grid">
     ${!show('bestd') ? '' : `<div class="card ${show('bestm') ? '' : 'span2'}"><div class="label">${ICONS.star}${perLabel(p, 'Найкращий день місяця', 'Найкращий день року')}</div>${bestDay ? `<div class="mid">${dmy(bestDay.date)}</div><div class="chg up">${money(bestDay.amount)}</div>` : '<div class="mid flat">—</div>'}</div>`}
     ${!show('bestm') ? '' : `<div class="card ${show('bestd') ? '' : 'span2'}"><div class="label">${ICONS.trophy}Найкращий місяць</div>${bm ? `<div class="mid">${monthName(bm[0])}</div><div class="chg up">${money(bm[1])}</div>` : '<div class="mid flat">—</div>'}<div class="sub">за весь час</div></div>`}
@@ -548,7 +559,7 @@ function viewPanel() {
   <div class="card">
     <div class="section-title"><h2>Підсумок по місяцях</h2><span class="sub">${p.kind === 'all' ? 'весь час' : year}</span></div>
     <div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Речей</th><th>Продажі</th><th>Витрати</th><th>Прибуток</th><th>Години</th>${cmpOff() ? '' : '<th>Δ</th>'}</tr></thead><tbody>
-    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const pr = mrows.find(x => x.k === shiftYM(m.k, -1)); const ps = pr ? pr.s : 0; return `<tr><td>${p.kind === 'all' ? monthName(m.k) : MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td>${cmpOff() ? '' : `<td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}</td>`}</tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
+    ${mrows.filter(m => m.s || m.e || m.w).reverse().map(m => { const pp = period(m.k), ps = pp.same ? S_(pp.same.start, pp.same.end) : sum(inYM(all, shiftYM(m.k, -1)), x => x.amount); return `<tr><td>${p.kind === 'all' ? monthName(m.k) : MONTHS[+m.k.slice(5) - 1]}</td><td>${m.n}</td><td><b>${money(m.s)}</b></td><td class="muted">${money(m.e)}</td><td>${money(m.p)}</td><td class="muted">${hmShort(m.w)}</td>${cmpOff() ? '' : `<td>${ps ? pct(m.s, ps) : '<span class="chg flat">—</span>'}${pp.same ? `<div class="sub">1–${+pp.same.end.slice(8)}</div>` : ''}</td>`}</tr>`; }).join('') || '<tr><td colspan="7" class="empty">Немає даних</td></tr>'}
     </tbody></table></div>
   </div>`;
 
@@ -595,7 +606,7 @@ function viewExpenses() {
   rows.forEach(e => {
     const m = ymOf(e.date);
     if (p.kind !== 'month' && m !== lm) { body += sepRow(m, 3, money(sum(inYM(cur, m), x => x.amount))); lm = m; }
-    body += `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${dowOf(e.date)}</span></td><td class="muted">${esc(e.category)}</td><td><b>${money(e.amount)}</b></td></tr>${e.desc ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="desc">${esc(e.desc)}</td></tr>` : ''}${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`;
+    body += `<tr class="tap" data-id="${e.id}"><td>${dmy(e.date)} <span class="muted">${dowOf(e.date)}</span></td><td class="muted">${esc(e.category)}${e.qty ? ` <span class="sub">· ${e.qty} шт.</span>` : ''}</td><td><b>${money(e.amount)}</b></td></tr>${e.desc ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="desc">${esc(e.desc)}</td></tr>` : ''}${e.note ? `<tr class="tap" data-id="${e.id}"><td colspan="3" class="note">${esc(e.note)}</td></tr>` : ''}`;
   });
   $('#view').innerHTML = `
   <div class="grid g4">
@@ -604,6 +615,7 @@ function viewExpenses() {
     ${kpi('box', perLabel(p, 'Закупок за місяць', 'Закупок за рік'), buys.length, cmp(buys.length, N_, p, true) + '<div class="sub">тільки секонд</div>')}
     ${kpi('star', 'Середньо за закупку', money(buys.length ? sBuys / buys.length : 0), '<div class="sub">тільки секонд</div>')}
   </div>
+  ${buyCard(p)}
   <div class="grid g3">
     <div class="card span2"><div class="section-title"><h2>Просування на Vinted</h2><span class="sub">${p.name}</span></div>
       ${promos.length ? `<div class="list-days">
@@ -655,23 +667,66 @@ function viewWork() {
 }
 
 /* ===== items analytics ===== */
-const DOW_MON = ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
-const DOW_ON = ['понеділок','вівторок','середу','четвер','пʼятницю','суботу','неділю'];
-const LBLOCKS = [[0, 6], [6, 9], [9, 12], [12, 15], [15, 18], [18, 21], [21, 24]];
-const monIdx = d => (new Date(d + 'T12:00').getDay() + 6) % 7;
-const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-const daysBetween = (listed, sold) => Math.max(0, Math.round((new Date(sold + 'T12:00') - new Date(listed.slice(0, 10) + 'T12:00')) / 864e5));
-const daysTxt = n => n == null ? "—" : Math.round(n) < 1 ? "того ж дня" : `≈${Math.round(n)} дн.`;
+/* categorizer (port of build/build_items.py) */
+const normT = t => String(t || '').toLowerCase().replace(/ł/g, 'l').normalize('NFKD').replace(/[̀-ͯ]/g, '');
+const CAT_DEFS = [
+  ['Піджаки', String.raw`marynark\w*|blazer\w*|garnitur(?!ow\w*|u)|sakko|suit jacket`],
+  ['Жилети', String.raw`bezrekawnik\w*|kamizelk\w*|vest|gilet|sleeveless`],
+  ['Куртки', String.raw`kurtk\w*|jacket|parka|wiatrowk\w*|softshell|puchowk\w*|plaszcz\w*|coat|anorak|windbreaker|bomber\w*|harrington|puffer|jacke|mantel|ocieplan\w*|pikowan\w*|blouson|trucker`],
+  ['Спортивні костюми', String.raw`dres komplet\w*|komplet dresow\w*|tracksuit|komplet`],
+  ['Лонгсліви', String.raw`longsleeve|long sleeve|longslv|dlugi rekaw`],
+  ['Фліси', String.raw`polar\w*|fleece|flis\w*`],
+  ['Поло', String.raw`polo shirt|koszulka polo|polo koszulka|poloshirt|polowka`],
+  ['Худі та світшоти', String.raw`bluz\w*|hoodie\w*|sweatshirt\w*|crewneck|crew neck|swetshirt|kaptur\w*|half zip|quarter zip|1/4 zip`],
+  ['Светри', String.raw`sweter\w*|sweater\w*|pullover|kardigan\w*|cardigan\w*|knit\w*|jumper|dzianin\w*`],
+  ['Футболки', String.raw`podkoszulk\w*|t-shirt\w*|tshirt\w*|t shirt|koszulk\w*|tee|jersey|tank top|crop top|singlet|podkoszulek\w*|trikot`],
+  ['Сорочки', String.raw`koszul\w*|shirt\w*|flanel\w*`],
+  ['Поло', String.raw`polo(?! ralph| by)|polo ralph laurent`],
+  ['Шорти', String.raw`spodenk\w*|szort\w*|shorts?|bermud\w*|kapielowk\w*`],
+  ['Штани', String.raw`spodni\w*|spodnie|jeans\w*|dzins\w*|chinos?|jogger\w*|trousers?|pants|cargo\w*|legginsy|leggings|dresy|sztruks\w*|denim|ogrodniczk\w*`],
+  ['Взуття', String.raw`buty|sneaker\w*|adidasy|trampki|shoes?|boty|kapcie|klapki|sandal\w*|obuwie|boots?|botki|kozaki|halowki|korki|czlowenk\w*|chuck taylor|high top|ortholite|paraboot|polbut\w*|mokasyn\w*|loafer\w*|szpilk\w*|czolenk\w*|oxford\w*|oksford\w*|brogs\w*|sztyblet\w*|sztybet\w*|derby|kowbojk\w*|klaps\w*|mule|balerink\w*|baleriny|snickers\w*|gel-\w+|xt-6|speedgoat|hoka|sandaly|monk strap|mary jane|wsuwane|balenciaga track|air max|air force|jordan|ultra boost|ultraboost|samba|gazelle|campus|superstar|stan smith|dunk|nmd|yeezy`],
+  ['Сумки та аксесуари', String.raw`torb\w*|plecak\w*|czapk\w*|kapelusz\w*|szalik\w*|rekawiczk\w*|pasek|nerk\w*|saszetk\w*|cap|beanie|bag|backpack|hat|scarf|gloves?|belt|wallet|portfel\w*|krawat\w*|szal|pierscien\w*|krzyzyk\w*|nalokietnik\w*|pas z\w*|torebk\w*|daszek|rekawic\w*|holder|sunglasses|kart holder|blind haki|haki|okulary|zegarek|bandana|opaska|skarpet\w*|socks?|snapback|komin\w*|listonoszk\w*`],
+  ['Книги', String.raw`ksiazk\w*|book|harry potter|powiesc|komiks\w*|manga|podrecznik\w*`]
+];
+let CAT_RX = null;
+const CAT_OVERRIDES = { 'Kurtka garnitur Yohji Yamamoto Y-3': 'Куртки', 'Stone Island grey long opium swag': 'Лонгсліви' };
+function categorize(title) {
+  if (!CAT_RX) CAT_RX = CAT_DEFS.map(([n, p]) => [n, new RegExp('(?<![a-z0-9])(?:' + p + ')(?![a-z0-9])')]);
+  const t = normT(title), raw = String(title || '').trim();
+  for (const k in CAT_OVERRIDES) if (raw.startsWith(k)) return CAT_OVERRIDES[k];
+  for (const [n, rx] of CAT_RX) if (rx.test(t)) return n;
+  return 'Інше';
+}
+const BRAND_LIST = ['Polo Ralph Lauren', 'Ralph Lauren', 'The North Face', 'Tommy Hilfiger', 'Tommy Jeans', 'Calvin Klein', 'Hugo Boss', 'Under Armour', 'New Balance', 'Helly Hansen', 'Jack Wolfskin', 'Stone Island', 'Fred Perry', "Levi's", 'Levis', 'Nike', 'Adidas', 'Puma', 'Lacoste', 'Carhartt', 'Mammut', 'Patagonia', 'Columbia', 'Champion', 'Reebok', 'Napapijri', 'Salomon', 'Diesel', 'Guess', 'Superdry', 'Fila', 'Umbro', 'Kappa', 'Ellesse', 'Asics', 'Converse', 'Vans', 'Wrangler', 'Armani', 'Versace', 'Gant', 'Barbour', 'Timberland', 'Dickies', 'Russell Athletic', 'Starter', 'Mizuno', 'Quiksilver', 'Billabong', 'Oakley', "Arc'teryx", 'Marmot', 'Berghaus', 'Regatta', 'Craghoppers', 'Fjallraven', 'Sergio Tacchini', 'Lonsdale', 'Lyle & Scott', 'Pepe Jeans', 'Replay', 'Hollister', 'Abercrombie', 'Tom Tailor', 'Esprit', 'Peak Performance', 'Jordan', 'Supreme', 'Stussy', 'Moncler', 'Burberry', 'Nautica', 'Henri Lloyd', 'Slazenger', 'Hummel', 'Diadora', 'Joma', 'Erima', 'Jako', 'Gildan', 'Fruit of the Loom', 'Tommy'];
+const BRAND_CANON = { 'levis': "Levi's", 'polo ralph lauren': 'Ralph Lauren', 'ralph lauren': 'Ralph Lauren', 'tommy': 'Tommy Hilfiger', 'tommy jeans': 'Tommy Hilfiger', 'adidas': 'Adidas', 'boss': 'Hugo Boss', 'fjallraven': 'Fjällräven' };
+let BRAND_RX = null;
+function guessBrand(title) {
+  if (!BRAND_RX) BRAND_RX = BRAND_LIST.map(b => [b, new RegExp('(?<![a-z0-9])' + normT(b).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])')]);
+  const t = normT(title);
+  for (const [b, rx] of BRAND_RX) if (rx.test(t)) return BRAND_CANON[normT(b)] || b;
+  return null;
+}
+/* items = products of current sales; cat/brand taken from data.items when row matches, otherwise computed */
+function buildItems() {
+  const meta = new Map();
+  (Array.isArray(S.data.items) ? S.data.items : []).forEach(it => { if (it && it.sale != null) meta.set(it.sale + '#' + it.idx, it); });
+  const items = [], bare = [];
+  S.data.sales.forEach(sl => {
+    if (!sl.products || !sl.products.length) { bare.push(sl); return; }
+    sl.products.forEach((pr, i) => {
+      if (pr.price == null || isNaN(+pr.price)) return;
+      const name = String(pr.name || '').trim(), m = meta.get(sl.id + '#' + i), ok = m && String(m.name || '').trim() === name;
+      items.push({ sale: sl.id, idx: i, acc: sl.account, date: sl.date, name, price: +pr.price, cat: (ok && m.cat) || categorize(name), brand: (ok && m.brand) || guessBrand(name) });
+    });
+  });
+  return { items, bare };
+}
 const itemCat = it => it.cat || 'Інше';
 const itemsWho = () => store.get('vs_items_who') || 'all';
 function itemsGroup(arr, keyFn) {
   const m = new Map();
   arr.forEach(it => { const k = keyFn(it); if (k == null) return; if (!m.has(k)) m.set(k, []); m.get(k).push(it); });
-  return [...m.entries()].map(([k, list]) => {
-    const total = sum(list, x => x.price), days = list.filter(x => x.listed && x.listed.length >= 10).map(x => daysBetween(x.listed, x.date));
-    const lp = list.filter(x => x.list_price > 0 && x.price != null).map(x => (x.list_price - x.price) / x.list_price);
-    return { k, list, n: list.length, total, avg: list.length ? total / list.length : 0, days: median(days), nDays: days.length, torg: lp.length ? lp.reduce((a, b) => a + b, 0) / lp.length : null };
-  });
+  return [...m.entries()].map(([k, list]) => { const total = sum(list, x => x.price); return { k, list, n: list.length, total, avg: list.length ? total / list.length : 0 }; });
 }
 function itemsSheet(title, list) {
   const rows = [...list].sort((a, b) => b.date.localeCompare(a.date));
@@ -681,85 +736,28 @@ function itemsSheet(title, list) {
 }
 function viewItems() {
   setTitle('Аналітика товарів');
-  const all = Array.isArray(S.data.items) ? S.data.items.filter(x => x && x.date && x.price != null) : [];
-  if (!all.length) { $('#view').innerHTML = '<div class="card"><div class="empty">Дані про товари ще не додані.</div></div>'; return; }
+  const { items: all, bare: bareAll } = buildItems();
+  if (!all.length && !bareAll.length) { $('#view').innerHTML = '<div class="card"><div class="empty">Дані про товари ще не додані.</div></div>'; return; }
   // who filter
   const accs = S.data.accounts || [], owners = [...new Set(accs.map(a => a.owner).filter(Boolean))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
   const whoOpts = [{ v: 'all', t: 'Усі' }].concat(owners.map(o => ({ v: 'o:' + o, t: o })), accs.map(a => ({ v: 'a:' + a.id, t: a.id })));
   let who = itemsWho(); if (!whoOpts.some(o => o.v === who)) who = 'all';
   const accOk = who === 'all' ? null : who.startsWith('o:') ? new Set(accs.filter(a => a.owner === who.slice(2)).map(a => a.id)) : new Set([who.slice(2)]);
   const p = P();
-  const items = all.filter(it => (!accOk || accOk.has(it.acc)) && (p.kind === 'all' || (it.date >= p.start && it.date <= p.end)));
+  const inF = it => (!accOk || accOk.has(it.acc)) && (p.kind === 'all' || (it.date >= p.start && it.date <= p.end));
+  const items = all.filter(inF), bare = bareAll.filter(x => inF({ acc: x.account, date: x.date }));
+  const bareNote = bare.length ? `<div class="sub" style="margin:4px 4px 12px;text-align:center">Без назв речей: ${bare.length} продаж(і), ${sum(bare, x => x.items)} речей, ${money(sum(bare, x => x.amount))} (не враховано)</div>` : '';
   const head = `<div class="card"><label class="field" style="margin:0"><span>Хто</span><select id="itWho">${whoOpts.map(o => `<option value="${esc(o.v)}" ${o.v === who ? 'selected' : ''}>${esc(o.t)}</option>`).join('')}</select></label></div>`;
   const bind = () => { $('#itWho').onchange = e => { store.set('vs_items_who', e.target.value); render(); }; };
-  if (!items.length) { $('#view').innerHTML = head + `<div class="card"><div class="empty">За цей період немає проданих речей.</div></div>`; bind(); return; }
+  if (!items.length) { $('#view').innerHTML = head + `<div class="card"><div class="empty">За цей період немає проданих речей.</div></div>` + bareNote; bind(); return; }
 
   const cats = itemsGroup(items, itemCat), cnt = items.length, total = sum(items, x => x.price);
   const sortedCats = [...cats].sort((a, b) => b.n - a.n || b.total - a.total);
   const topCat = sortedCats[0], maxN = topCat.n;
   const rich = cats.filter(c => c.n >= 3).sort((a, b) => b.avg - a.avg)[0];
 
-  // block 3
-  const prof = cats.filter(c => c.n >= 3).sort((a, b) => b.avg - a.avg);
-  const fast = prof.filter(c => c.nDays >= 3 && c.days != null).sort((a, b) => a.days - b.days)[0];
-  const torgTxt = v => { if (v == null) return '—'; const r = Math.round(v * 100); return r > 0 ? `−${r}%` : r < 0 ? `+${-r}%` : '0%'; };
-  const take3 = prof.length ? `Найдорожче продаються ${esc(prof[0].k)} (≈${Math.round(prof[0].avg)} zł)${fast ? `, найшвидше — ${esc(fast.k)} (${daysTxt(fast.days)})` : ''}.` : 'Замало даних: потрібно хоча б 3 речі в категорії.';
 
-  // block 4
   const brands = itemsGroup(items, x => x.brand ? String(x.brand).trim() : null).sort((a, b) => b.n - a.n || b.total - a.total).slice(0, 10);
-
-  // block 5
-  const dowC = Array(7).fill(0), hourC = Array(24).fill(0); let withTime = 0;
-  items.forEach(it => {
-    dowC[monIdx(it.date)]++;
-    if (it.time && /^\d{1,2}:/.test(it.time)) { hourC[Math.min(23, +it.time.split(':')[0])]++; withTime++; }
-  });
-  const bestDow = dowC.indexOf(Math.max(...dowC));
-  let bestH = -1, bestHS = 0;
-  if (withTime) for (let h = 0; h <= 21; h++) { const s = hourC[h] + hourC[h + 1] + hourC[h + 2]; if (s > bestHS) { bestHS = s; bestH = h; } }
-  const take5 = `Найбільше замовлень — у ${DOW_ON[bestDow]} (${dowC[bestDow]})${bestH >= 0 ? `, найактивніший час — ${bestH}:00–${bestH + 3}:00 (${bestHS})` : ''}.`;
-
-  // block 6
-  const lst = items.filter(x => x.listed && x.listed.length >= 10).map(x => ({ d: monIdx(x.listed.slice(0, 10)), b: x.listed.length >= 13 ? (h => h < 6 ? 0 : Math.floor(h / 3) - 1)(+x.listed.slice(11, 13)) : null, days: daysBetween(x.listed, x.date) }));
-  const bucket = (keyFn, labelFn) => Array.from({ length: 7 }, (_, i) => { const l = lst.filter(x => keyFn(x) === i); return { i, label: labelFn(i), n: l.length, med: median(l.map(x => x.days)) }; });
-  const byListDow = bucket(x => x.d, i => DOW_MON[i]);
-  const byListHr = bucket(x => x.b, i => `${LBLOCKS[i][0]}–${LBLOCKS[i][1]}`);
-  const combos = [];
-  for (let d = 0; d < 7; d++) for (let b = 0; b < 7; b++) { const l = lst.filter(x => x.d === d && x.b === b); if (l.length >= 3) combos.push({ d, b, n: l.length, med: median(l.map(x => x.days)) }); }
-  const bd = byListDow.filter(x => x.n >= 3).sort((a, b) => a.med - b.med)[0], bb = byListHr.filter(x => x.n >= 3).sort((a, b) => a.med - b.med)[0];
-  const bc = combos.sort((a, b) => a.med - b.med)[0];
-  const take6 = bc ? `Найшвидше продаються речі, виставлені у ${DOW_ON[bc.d]} о ${LBLOCKS[bc.b][0]}–${LBLOCKS[bc.b][1]} (${daysTxt(bc.med)}).`
-    : bd || bb ? `Найшвидше продаються речі, виставлені ${bd ? `у ${DOW_ON[bd.i]} (${daysTxt(bd.med)})` : ''}${bd && bb ? ', ' : ''}${bb ? `о ${bb.label} (${daysTxt(bb.med)})` : ''}.` : 'Замало даних про дату виставлення.';
-  // recommendation card
-  const DOW_NOM = ['понеділок','вівторок','середа','четвер','пʼятниця','субота','неділя'];
-  let rec;
-  if (withTime < 20) rec = `<div class="big" style="font-size:17px;white-space:normal">Замало даних для рекомендації</div>`;
-  else {
-    let win = null;
-    for (let len = 3; len <= 12 && !win; len++) {
-      for (let s = 0; s + len <= 24; s++) {
-        let c = 0; for (let h = s; h < s + len; h++) c += hourC[h];
-        if (c >= 0.6 * withTime && (!win || c > win.c)) win = { s, e: s + len, c };
-      }
-    }
-    const hh = h => String(h).padStart(2, '0') + ':00';
-    const dayAvg = cnt / 7, top3 = dowC.map((c, i) => ({ c, i })).sort((a, b) => b.c - a.c || a.i - b.i).slice(0, 3);
-    const daysLine = top3.reduce((a, x) => a + x.c, 0) / 3 < dayAvg * 1.05 ? 'Дні тижня майже не впливають' : `Найкращі дні: ${top3.map(x => DOW_NOM[x.i]).join(', ')}`;
-    const allMed = median(lst.map(x => x.days));
-    let worst = null;
-    if (allMed != null) LBLOCKS.forEach((_, b) => {
-      const l = lst.filter(x => x.b === b); if (l.length < 5) return;
-      const m = median(l.map(x => x.days));
-      if (m >= 2 * allMed && m - allMed >= 2 && (!worst || m > worst.m)) worst = { b, m };
-    });
-    rec = win
-      ? `<div class="big">з ${hh(win.s)} до ${hh(win.e)}</div><div style="font-weight:600;margin:2px 0 6px">${daysLine}</div>
-         <div class="sub">У цей час приходить ${Math.round(win.c / withTime * 100)}% замовлень.</div>
-         ${worst ? `<div class="sub">Речі, виставлені з ${hh(LBLOCKS[worst.b][0])} до ${hh(LBLOCKS[worst.b][1] % 24)}, продаються повільніше (${daysTxt(worst.m)} проти ${daysTxt(allMed)}).</div>` : ''}`
-      : `<div class="big" style="font-size:17px;white-space:normal">Замовлення розкидані по всій добі</div><div style="font-weight:600;margin:2px 0 6px">${daysLine}</div>`;
-    rec += `<div class="sub" style="margin-top:8px;font-size:12px">на основі ${withTime} замовлень</div>`;
-  }
-  const bTable = (title, arr) => `<div class="scroll-x"><table class="table"><thead><tr><th>${title}</th><th>Речей</th><th>Днів до<br>продажу</th></tr></thead><tbody>${arr.map(x => `<tr><td>${x.label}</td><td>${x.n}</td><td>${x.n >= 3 ? `<b>${daysTxt(x.med)}</b>` : '<span class="muted">Мало даних</span>'}</td></tr>`).join('')}</tbody></table></div>`;
 
   $('#view').innerHTML = head + `
   <div class="grid">
@@ -768,39 +766,17 @@ function viewItems() {
     ${kpi('trophy', 'Найпопулярніше', esc(topCat.k), `<div class="sub">${topCat.n} шт.</div>`)}
     ${kpi('trend', 'Найдорожче в середньому', rich ? esc(rich.k) : '—', `<div class="sub">${rich ? `≈${money(rich.avg)}` : 'потрібно від 3 речей'}</div>`)}
   </div>
-  <div class="card dark"><div class="label">${ICONS.clock}Рекомендація: коли виставляти</div>${rec}</div>
   <div class="card">
     <div class="section-title"><h2>Що продається найбільше</h2><span class="sub">${esc(p.name)}</span></div>
     <div class="scroll-x"><table class="table"><thead><tr><th>Тип</th><th>Шт.</th><th>Сума</th><th>Сер. чек</th></tr></thead><tbody>${sortedCats.map((c, i) => `<tr class="tap" data-c="${i}"><td>${esc(c.k)}<div class="hbar"><i style="width:${Math.round(c.n / maxN * 100)}%"></i></div></td><td>${c.n}</td><td>${m0(c.total)}</td><td>${m0(c.avg)}</td></tr>`).join('')}</tbody></table></div>
     <div class="sub" style="margin-top:8px">Натисніть на рядок, щоб побачити речі</div>
   </div>
   <div class="card">
-    <div class="section-title"><h2>Що найвигідніше</h2><span class="sub">від 3 речей</span></div>
-    <p class="sub" style="margin:0 0 8px">${take3}</p>
-    ${prof.length ? `<div class="scroll-x"><table class="table" style="font-size:13px"><thead><tr><th>Тип</th><th>Сер. чек</th><th>Днів до<br>продажу</th><th>Торг</th></tr></thead><tbody>${prof.map(c => `<tr><td>${esc(c.k)}</td><td><b>${m0(c.avg)}</b></td><td>${c.nDays ? daysTxt(c.days) : '—'}</td><td>${torgTxt(c.torg)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Мало даних</div>'}
-  </div>
-  <div class="card">
     <div class="section-title"><h2>Топ брендів</h2><span class="sub">топ 10</span></div>
     ${brands.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Бренд</th><th>Шт.</th><th>Сума</th><th>Сер. чек</th></tr></thead><tbody>${brands.map(b => `<tr><td>${esc(b.k)}</td><td>${b.n}</td><td>${m0(b.total)}</td><td>${m0(b.avg)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Бренди не вказані</div>'}
-  </div>
-  <div class="card">
-    <div class="section-title"><h2>Коли купують</h2><span class="sub">за днями тижня</span></div>
-    <div class="chart-box small"><canvas id="cItDow"></canvas></div>
-    ${withTime ? `<div class="section-title" style="margin-top:14px"><h2>За годинами</h2><span class="sub">${withTime} з ${cnt} речей</span></div><div class="chart-box small"><canvas id="cItHour"></canvas></div>` : '<div class="sub" style="margin-top:10px">Час замовлення невідомий.</div>'}
-    <p class="sub" style="margin:10px 0 0">${take5}<br>за часом замовлення</p>
-  </div>
-  <div class="card">
-    <div class="section-title"><h2>Коли виставляти</h2><span class="sub">${lst.length} речей з датою</span></div>
-    <p class="sub" style="margin:0 0 8px">${take6}</p>
-    ${lst.length ? bTable('День виставлення', byListDow) + '<div style="height:10px"></div>' + bTable('Година виставлення', byListHr) : '<div class="empty">Мало даних</div>'}
-    <div class="sub" style="margin-top:8px">Дата виставлення є не для всіх акаунтів. Днів до продажу — медіана.</div>
-  </div>`;
+  </div>` + bareNote;
   bind();
   $('#view').querySelectorAll('tr.tap[data-c]').forEach(tr => tr.onclick = () => { const c = sortedCats[+tr.dataset.c]; itemsSheet(`${c.k} · ${c.n} шт.`, c.list); });
-  const ink = cssVar('--ink'), bar = (id, labels, data) => chart(id, { type: 'bar', data: { labels, datasets: [{ data, backgroundColor: ink, borderRadius: 6, borderSkipped: false, maxBarThickness: 28 }] },
-    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw} шт.` } } }, scales: { x: { grid: { display: false }, border: { display: false } }, y: { ...gridOpts(), beginAtZero: true, ticks: { precision: 0 } } } } });
-  bar('cItDow', DOW_MON, dowC);
-  if (withTime) bar('cItHour', hourC.map((_, h) => String(h)), hourC);
 }
 
 function viewSettings(err) {
@@ -850,7 +826,13 @@ function openSheet(html, bind) {
 }
 function closeSheet() { $('#sheetWrap').hidden = true; }
 $('#sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') closeSheet(); });
-const num = v => { const n = parseFloat(String(v).replace(',', '.').replace(/\s/g, '')); return isFinite(n) ? n : NaN; };
+const num = v => {
+  let t = String(v ?? '').replace(/[\s\u00a0]/g, '');
+  const c = t.lastIndexOf(','), d = t.lastIndexOf('.');
+  if (c >= 0 && d >= 0) t = c > d ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  else t = t.replace(',', '.');
+  return /^[+-]?(\d+\.?\d*|\.\d+)$/.test(t) ? parseFloat(t) : NaN;
+};
 
 function prodLine(s) {
   if (!s.products || !s.products.length) return '';
@@ -878,36 +860,56 @@ function saleForm(acc, s) {
       if (!date) return toast('Вкажіть дату'); if (!(items >= 0)) return toast('Вкажіть кількість речей'); if (!(amount >= 0)) return toast('Вкажіть суму');
       const ta = el.querySelector('#fNames'), names = ta ? ta.value.split('\n').map(x => x.trim()).filter(Boolean) : null;
       const extra = names && names.length ? { products: names.map(name => ({ name })) } : {};
-      closeSheet();
-      if (edit) await save(`Змінено продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł (було ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł)`, d => Object.assign(d.sales.find(x => x.id === s.id), { date, items, amount }, extra));
-      else await save(`Продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł`, d => d.sales.push({ id: uid('s'), account: acc, date, items, amount, ...extra }));
-      focusDate(date); render();
+      const ok = edit ? await save(`Змінено продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł (було ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł)`, d => Object.assign(d.sales.find(x => x.id === s.id), { date, items, amount }, extra))
+        : await save(`Продаж ${acc} ${dmy(date)}: ${items} шт, ${amount} zł`, d => d.sales.push({ id: uid('s'), account: acc, date, items, amount, ...extra }));
+      if (!ok) return;
+      closeSheet(); focusDate(date); render();
     };
-    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити продаж ${dmy(s.date)} на ${money(s.amount)}?`)) return; closeSheet(); await save(`Видалено продаж ${acc} ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł`, d => { d.sales = d.sales.filter(x => x.id !== s.id); }); };
+    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити продаж ${dmy(s.date)} на ${money(s.amount)}?`)) return; if (await save(`Видалено продаж ${acc} ${dmy(s.date)}: ${s.items} шт, ${s.amount} zł`, d => { d.sales = d.sales.filter(x => x.id !== s.id); })) closeSheet(); };
   });
 }
 
+const promoPlat = c => !String(c || '').startsWith('Просування') ? null : /ebay/i.test(c) ? 'ebay' : 'vinted';
+function promoAccOpts(cat, sel) {
+  const pl = promoPlat(cat), list = S.data.accounts.filter(a => (a.platform || 'vinted') === pl);
+  const def = sel && list.some(a => a.id === sel) ? sel : (list.find(a => a.status !== 'archive') || list[0] || {}).id;
+  return list.map(a => `<option value="${esc(a.id)}" ${a.id === def ? 'selected' : ''}>${esc(a.id)}</option>`).join('');
+}
 function expenseForm(e) {
-  const edit = !!e;
+  const edit = !!e, eAcc = e ? (e.account || (e.desc || '').split(' · ')[0]) : null;
   openSheet(`<h3>${edit ? 'Редагувати витрату' : 'Нова витрата'}</h3>
     ${e && e.source ? `<div class="src">Запис у нотатці: ${esc(e.source)}</div>` : ''}
     <div class="row2"><label class="field"><span>Дата</span><input id="fDate" type="date" value="${e ? e.date : todayISO()}"></label>
     <label class="field"><span>Сума, zł</span><input id="fAmt" type="text" inputmode="decimal" value="${e ? String(e.amount).replace('.', ',') : ''}" placeholder="0,00"></label></div>
     <label class="field"><span>На що</span><select id="fCat">${CATS.map(c => `<option ${e && e.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+    <label class="field" id="fAccWrap" ${e && promoPlat(e.category) ? '' : 'style="display:none"'}><span>Акаунт</span><select id="fAcc">${e && promoPlat(e.category) ? promoAccOpts(e.category, eAcc) : ''}</select></label>
+    <label class="field" id="fQtyWrap" ${e && isBuyCat(e.category) ? '' : 'style="display:none"'}><span>Кількість речей (необов'язково)</span><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="${e && e.qty ? e.qty : ''}"></label>
     <label class="field"><span>Примітка (необов'язково)</span><input id="fNote" type="text" value="${e ? esc(e.note || '') : ''}"></label>
     <button class="btn" id="ok">${edit ? 'Зберегти зміни' : 'Додати витрату'}</button>
     ${edit ? '<button class="btn danger" id="del">Видалити запис</button>' : ''}
     <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
     el.querySelector('#cancel').onclick = closeSheet;
+    el.querySelector('#fCat').onchange = ev => {
+      const c = ev.target.value, aw = el.querySelector('#fAccWrap'), as = el.querySelector('#fAcc');
+      el.querySelector('#fQtyWrap').style.display = isBuyCat(c) ? '' : 'none';
+      if (promoPlat(c)) { as.innerHTML = promoAccOpts(c, as.value || eAcc); aw.style.display = ''; } else aw.style.display = 'none';
+    };
     el.querySelector('#ok').onclick = async () => {
       const date = el.querySelector('#fDate').value, amount = r2(num(el.querySelector('#fAmt').value)), category = el.querySelector('#fCat').value, note = el.querySelector('#fNote').value.trim();
+      const q = parseInt(el.querySelector('#fQty').value, 10), qty = isBuyCat(category) && q >= 1 ? q : null;
       if (!date) return toast('Вкажіть дату'); if (!(amount >= 0)) return toast('Вкажіть суму');
-      closeSheet();
-      if (edit) await save(`Змінено витрату ${dmy(date)}: ${amount} zł (${category})`, d => Object.assign(d.expenses.find(x => x.id === e.id), { date, amount, category, note }));
-      else await save(`Витрата ${dmy(date)}: ${amount} zł (${category})`, d => d.expenses.push({ id: uid('e'), date, category, amount, note }));
-      focusDate(date); render();
+      const promo = !!promoPlat(category), account = promo ? el.querySelector('#fAcc').value : null;
+      if (promo && !account) return toast('Вкажіть акаунт');
+      const ok = edit ? await save(`Змінено витрату ${dmy(date)}: ${amount} zł (${category})`, d => {
+          const x = Object.assign(d.expenses.find(y => y.id === e.id), { date, amount, category, note });
+          if (promo) { x.account = account; if (category === 'Просування Vinted' && !x.kind) x.kind = 'other'; }
+          if (qty) x.qty = qty; else delete x.qty;
+        })
+        : await save(`Витрата ${dmy(date)}: ${amount} zł (${category})`, d => d.expenses.push({ id: uid('e'), date, category, amount, note, ...(qty ? { qty } : {}), ...(promo ? { account } : {}), ...(category === 'Просування Vinted' ? { kind: 'other' } : {}) }));
+      if (!ok) return;
+      closeSheet(); focusDate(date); render();
     };
-    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити витрату ${dmy(e.date)} на ${money(e.amount)}?`)) return; closeSheet(); await save(`Видалено витрату ${dmy(e.date)}: ${e.amount} zł`, d => { d.expenses = d.expenses.filter(x => x.id !== e.id); }); };
+    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити витрату ${dmy(e.date)} на ${money(e.amount)}?`)) return; if (await save(`Видалено витрату ${dmy(e.date)}: ${e.amount} zł`, d => { d.expenses = d.expenses.filter(x => x.id !== e.id); })) closeSheet(); };
   });
 }
 
@@ -929,12 +931,12 @@ function workForm(w) {
       const hh = parseInt(el.querySelector('#fH').value || '0', 10), mm = parseInt(el.querySelector('#fM').value || '0', 10);
       if (!date) return toast('Вкажіть дату'); if (!(hh >= 0 && mm >= 0 && mm < 60)) return toast('Перевірте години і хвилини');
       const minutes = off && !hh && !mm ? null : hh * 60 + mm;
-      closeSheet();
-      if (edit) await save(`Змінено час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => Object.assign(d.work.find(x => x.id === w.id), { date, minutes, dayoff: off, note }));
-      else await save(`Час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => d.work.push({ id: uid('w'), date, minutes, dayoff: off, note }));
-      focusDate(date); render();
+      const ok = edit ? await save(`Змінено час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => Object.assign(d.work.find(x => x.id === w.id), { date, minutes, dayoff: off, note }))
+        : await save(`Час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => d.work.push({ id: uid('w'), date, minutes, dayoff: off, note }));
+      if (!ok) return;
+      closeSheet(); focusDate(date); render();
     };
-    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити запис за ${dmy(w.date)}?`)) return; closeSheet(); await save(`Видалено час роботи ${dmy(w.date)}`, d => { d.work = d.work.filter(x => x.id !== w.id); }); };
+    if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити запис за ${dmy(w.date)}?`)) return; if (await save(`Видалено час роботи ${dmy(w.date)}`, d => { d.work = d.work.filter(x => x.id !== w.id); })) closeSheet(); };
   });
 }
 
