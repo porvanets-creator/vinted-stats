@@ -165,6 +165,7 @@ function renderNav() {
       <div class="nav-sub" ${eOpen ? '' : 'hidden'}>${eAccs.map(a => link('acc:' + a.id, 'user', a.id, a.status === 'archive' ? 'архів' : '')).join('')}</div>`;
   }
   html += link('data', 'id', 'Дані');
+  html += link('taxes', 'coin', 'Податки');
   html += '<hr>' + link('expenses', 'wallet', 'Витрати') + link('work', 'clock', 'Час роботи');
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('.nav-group').forEach(b => b.onclick = () => {
@@ -280,7 +281,7 @@ const sepRow = (k, cols, extra) => `<tr class="sep"><td colspan="${cols}">${mont
 function render() {
   killCharts(); renderNav();
   const r = S.route, fab = $('#fab');
-  $('#monthWrap').hidden = r === 'settings' || r === 'data';
+  $('#monthWrap').hidden = r === 'settings' || r === 'data' || r === 'taxes';
   if (S.data) {
     const opts = monthOptions(), vals = opts.map(o => o.v);
     if (!S.month || !vals.includes(S.month)) S.month = vals.includes(store.get('vs_month')) ? store.get('vs_month') : ymOf(todayISO());
@@ -290,6 +291,7 @@ function render() {
   fab.hidden = true;
   if (r === 'settings' || !S.data) return viewSettings();
   if (r === 'data') return viewData();
+  if (r === 'taxes') return viewTaxes();
   if (r.startsWith('acc:')) { fab.hidden = false; fab.onclick = () => saleForm(r.slice(4)); return viewAccount(r.slice(4)); }
   if (r === 'expenses') { fab.hidden = false; fab.onclick = () => expenseForm(); return viewExpenses(); }
   if (r === 'work') { fab.hidden = false; fab.onclick = () => workForm(); return viewWork(); }
@@ -364,6 +366,62 @@ function viewAccount(id) {
     <div class="sub" style="margin-top:8px">Коли гроші прийшли на рахунок. На суми продажів не впливає.</div></div>`);
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => saleForm(id, S.data.sales.find(s => s.id === tr.dataset.id)));
   if ($('#cmpMode')) $('#cmpMode').onclick = () => cmpModeSheet(p);
+}
+function viewTaxes() {
+  setTitle('Податки');
+  const tax = S.data.tax;
+  if (!tax) { $('#view').innerHTML = '<div class="card"><div class="empty">Дані про податки ще не додані.</div></div>'; return; }
+  const rate = tax.rate || 0, pays = tax.payments || [], ebay = tax.ebayIncome || [];
+  const st = $('#pageStatus'); st.textContent = `ryczałt ${r2(rate * 100)}%`; st.className = 'status archive';
+  const ids = new Set(S.data.accounts.filter(a => a.owner === tax.owner && (a.platform || 'vinted') === 'vinted').map(a => a.id));
+  const rev = {};
+  S.data.sales.forEach(s => { if (ids.has(s.account)) rev[ymOf(s.date)] = r2((rev[ymOf(s.date)] || 0) + (+s.amount || 0)); });
+  ebay.forEach(e => { rev[e.period] = r2((rev[e.period] || 0) + (+e.amount || 0)); });
+  const ryc = pays.filter(p => p.type === 'ryczalt');
+  const today = todayISO(), curYM = ymOf(today), year = today.slice(0, 4);
+  const starts = [...Object.keys(rev).filter(k => rev[k] > 0), ...pays.map(p => p.period)].filter(Boolean).sort();
+  const firstPaid = ryc.map(p => p.period).filter(Boolean).sort()[0] || '0000-00';
+  const months = [];
+  if (starts.length) for (let m = starts[0]; m <= curYM; m = shiftYM(m, 1)) months.push(m);
+  const rows = months.map(m => {
+    const income = rev[m] || 0, due = income * rate, dueR = Math.round(due);
+    const mp = ryc.filter(p => p.period === m), paid = sum(mp, p => p.amount);
+    return { m, income, due, dueR, paid, hasPaid: mp.length > 0, dates: mp.map(p => p.date).sort(), diff: r2(paid - dueR), nodata: m < firstPaid, ongoing: m === curYM, pays: pays.filter(p => p.period === m).length };
+  }).filter(x => x.income > 0 || x.pays > 0).reverse();
+  const yr = rows.filter(x => x.m.startsWith(year) && !x.nodata && !x.ongoing);
+  const dueYear = sum(yr, x => x.dueR), paidYear = sum(yr, x => x.paid), diffYear = r2(paidYear - dueYear);
+  const next = [...rows].reverse().find(x => x.income > 0 && !x.hasPaid && !x.nodata && !x.ongoing);
+  let nextHtml = '<div class="mid flat">—</div><div class="sub">усе сплачено</div>';
+  if (next) {
+    const dl = shiftYM(next.m, 1), late = today > `${dl}-20`;
+    nextHtml = `<div class="mid">${monthName(next.m)}</div><div class="chg ${late ? 'down' : 'flat'}">${money(next.dueR)}</div><div class="sub">до 20.${dl.slice(5, 7)}.${dl.slice(0, 4)}${late ? ' · <span class="down">прострочено</span>' : ''}</div>`;
+  }
+  const diffCls = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+  const diffTxt = v => v === 0 ? 'сплачено' : `${v > 0 ? '+' : '−'}${money(Math.abs(v))}`;
+  const list = (type, empty) => {
+    const arr = pays.filter(p => p.type === type).sort((a, b) => b.date.localeCompare(a.date));
+    if (!arr.length) return `<div class="sub">${empty}</div>`;
+    const tot = sum(arr.filter(p => p.date.startsWith(year)), p => p.amount);
+    return `<div class="list-days">${arr.map(p => `<div><span>${dmy(p.date)} · ${p.period ? monthName(p.period) : ''}${p.note ? `<div class="sub down">${esc(p.note)}</div>` : ''}</span><b>${money(p.amount)}</b></div>`).join('')}</div>
+      <div class="sub" style="margin-top:8px">Разом за ${year} рік: <b>${money(tot)}</b></div>`;
+  };
+  $('#view').innerHTML = `
+  <div class="grid g3">
+    ${kpi('coin', 'Податок за рік', money(dueYear), `<div class="sub">сплачено ${money(paidYear)}</div>`, 'dark')}
+    <div class="card"><div class="label">${ICONS.swap}Недоплата / переплата</div><div class="big ${diffCls(diffYear)}">${diffTxt(diffYear)}</div><div class="sub">за ${year} рік</div></div>
+    <div class="card span2-m"><div class="label">${ICONS.cal}Наступний платіж</div>${nextHtml}</div>
+  </div>
+  ${firstPaid !== '0000-00' ? `<div class="sub" style="margin:-4px 4px 12px">рахується з ${monthName(firstPaid)} — раніше немає даних про оплату</div>` : ''}
+  <div class="card">
+    <div class="section-title"><h2>По місяцях</h2><span class="sub">ryczałt ${r2(rate * 100)}%</span></div>
+    ${rows.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Місяць</th><th>Дохід</th><th>${r2(rate * 100)}%</th><th>До сплати</th><th>Сплачено</th><th>Різниця</th></tr></thead><tbody>${rows.map(x => `
+      <tr><td>${monthName(x.m)}</td><td>${money(x.income)}</td><td>${money(x.due)}</td><td><b>${money(x.dueR)}</b></td>${x.nodata ? '<td colspan="2" class="muted">немає даних</td>' : `<td>${x.hasPaid ? money(x.paid) : '—'}</td><td class="${x.ongoing ? 'muted' : x.hasPaid ? diffCls(x.diff) : ''}">${x.ongoing ? 'триває' : x.hasPaid ? diffTxt(x.diff) : '—'}</td>`}</tr>
+      ${x.dates.length ? `<tr><td colspan="6" class="sub muted">сплачено: ${x.dates.map(dmy).join(', ')}</td></tr>` : ''}`).join('')}</tbody></table></div>`
+      : '<div class="empty">Ще немає даних за місяцями.</div>'}
+  </div>
+  <div class="card"><div class="section-title"><h2>ZUS (здоровотний внесок)</h2></div>${list('zus', 'платежів ще немає')}</div>
+  <div class="card"><div class="section-title"><h2>Бухгалтерка</h2></div>${list('ksiegowa', 'платежів ще немає')}</div>
+  ${tax.note ? `<div class="card"><div class="sub">${esc(tax.note)}</div></div>` : ''}`;
 }
 function viewData() {
   setTitle('Дані');
