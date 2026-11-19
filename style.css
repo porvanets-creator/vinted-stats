@@ -223,3 +223,29 @@ h1{font-size:22px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:elli
 .tm-row{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:2px}
 .pill{font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;white-space:nowrap;background:var(--soft);color:var(--muted)}
 .pill.ok{color:var(--green)} .pill.bad{color:var(--red)} .pill.wait{color:var(--ink)} .pill.muted{color:var(--muted)}
+
+/* ===== плавність (вигляд без змін) ===== */
+html{scroll-behavior:smooth}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.view>*{animation:fadeUp .35s cubic-bezier(.2,.8,.2,1) both}
+.view>*:nth-child(2){animation-delay:.04s}
+.view>*:nth-child(3){animation-delay:.08s}
+.view>*:nth-child(4){animation-delay:.12s}
+.view>*:nth-child(n+5){animation-delay:.16s}
+.grid>.card{animation:fadeUp .35s cubic-bezier(.2,.8,.2,1) both}
+.grid>.card:nth-child(2){animation-delay:.05s}
+.grid>.card:nth-child(3){animation-delay:.1s}
+.grid>.card:nth-child(n+4){animation-delay:.15s}
+.drawer{transition:transform .32s cubic-bezier(.2,.8,.2,1)}
+.scrim{transition:opacity .3s ease}
+.sheet-wrap{animation:fadeIn .2s ease}
+.sheet{animation:up .3s cubic-bezier(.2,.8,.2,1)}
+.progress i{animation:grow .8s cubic-bezier(.2,.8,.2,1) both;transform-origin:left}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.card,.btn,.icon-btn,.month-pill,.fab,.opt,.mini-btn,nav a,.nav-group,.nav-switch,.drawer-foot a,.info-row,.table tbody tr.tap{transition:transform .15s ease,background-color .2s ease,opacity .2s ease}
+.btn:active,.icon-btn:active,.fab:active,.opt:active,.mini-btn:active,.month-pill:active{transform:scale(.96)}
+nav a:active,.nav-group:active,.nav-switch:active,.drawer-foot a:active,.info-row:active{opacity:.6}
+.nav-sub:not([hidden]){animation:fadeUp .25s ease both}
+.data-body:not([hidden]){animation:fadeUp .25s ease both}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
