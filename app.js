@@ -12,6 +12,7 @@ const ICONS = {
   user:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
   wallet:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M16 13h2M3 10h18M6 6l9-3 1 3"/></svg>',
   clock:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  dl:'<svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>',
   gear:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.2 6.5l2.6 1.5M17.2 16l2.6 1.5M4.2 17.5l2.6-1.5M17.2 8l2.6-1.5"/></svg>',
   chart:'<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   cal:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>',
@@ -168,7 +169,7 @@ function renderNav() {
   }
   html += link('data', 'id', 'Дані');
   html += link('taxes', 'coin', 'Податки');
-  html += '<hr>' + link('expenses', 'wallet', 'Витрати') + link('work', 'clock', 'Час роботи');
+  html += '<hr>' + link('expenses', 'wallet', 'Витрати') + link('work', 'clock', 'Час роботи', S.data && S.data.timer ? 'іде' : '');
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('.nav-group').forEach(b => b.onclick = () => {
     const o = b.dataset.owner, sub = b.nextElementSibling, open = sub.hidden;
@@ -184,7 +185,9 @@ function renderNav() {
     ${sw('hourly', 'clock', 'Вартість години', show('hourly'))}
     ${sw('buys', 'box', 'Закупки', show('buys'))}
     <hr>
+    <a href="#" id="navExport">${ICONS.dl}<span>Вивантажити в Excel</span></a>
     <a href="#settings" class="${S.route === 'settings' ? 'active' : ''}">${ICONS.gear}<span>Налаштування</span></a>`;
+  $('#navExport').onclick = e => { e.preventDefault(); openDrawer(false); exportSheet(); };
   $('#navFoot').querySelectorAll('[data-sw]').forEach(b => b.onclick = () => {
     const k = b.dataset.sw;
     if (k === 'cmp') store.set('vs_cmp_off', cmpOff() ? '0' : '1');
@@ -282,7 +285,7 @@ const sepRow = (k, cols, extra) => `<tr class="sep"><td colspan="${cols}">${mont
 
 /* ===== views ===== */
 function render() {
-  killCharts(); renderNav();
+  killCharts(); clearInterval(S.timerIv); renderNav();
   const r = S.route, fab = $('#fab');
   $('#monthWrap').hidden = r === 'settings' || r === 'data' || r === 'taxes';
   if (S.data) {
@@ -651,7 +654,11 @@ function viewWork() {
     if (p.kind !== 'month' && m !== lm) { body += sepRow(m, 3, hmShort(sum(inYM(cur, m), y => y.minutes))); lm = m; }
     body += `<tr class="tap" data-id="${x.id}"><td>${dmy(x.date)} <span class="muted">${dowOf(x.date)}</span></td><td><b>${x.dayoff ? '—' : hmShort(x.minutes)}</b></td><td class="muted">${x.dayoff ? 'вихідний' : ''}</td></tr>${x.note ? `<tr class="tap" data-id="${x.id}"><td colspan="3" class="note">${esc(x.note)}</td></tr>` : ''}`;
   });
-  $('#view').innerHTML = `
+  const tm = S.data.timer, tmMin = tm ? Math.max(0, Math.round((Date.now() - new Date(tm.start)) / 60000)) : 0;
+  const timerCard = `<div class="card dark"><div class="label">Таймер роботи</div>${tm
+    ? `<div class="big">Працюєте з ${tm.start.slice(11, 16)}</div><div class="sub" id="tmEl">${hmShort(tmMin)}</div><button class="btn" id="tmStop" style="margin-top:10px">■ Закінчити</button><button class="btn ghost" id="tmCancel">Скасувати</button>`
+    : `<div class="big">Не запущено</div><button class="btn" id="tmStart" style="margin-top:10px">▶ Почати роботу</button>`}</div>`;
+  $('#view').innerHTML = timerCard + `
   <div class="grid g4">
     ${kpi('clock', perLabel(p, 'Години за місяць', 'Години за рік'), hmShort(mCur), cmp(mCur, M_, p), 'dark')}
     ${kpi('chart', 'Всього годин', hmShort(sum(w, x => x.minutes)), '<div class="sub">години приблизні</div>')}
@@ -664,6 +671,34 @@ function viewWork() {
       : `<div class="empty">За ${perWord(p)} записів немає.<br>Натисніть «+», щоб додати.</div>`}
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => workForm(w.find(x => x.id === tr.dataset.id)));
+  if ($('#tmStart')) $('#tmStart').onclick = timerStart;
+  if ($('#tmStop')) $('#tmStop').onclick = timerStop;
+  if ($('#tmCancel')) $('#tmCancel').onclick = timerCancel;
+  if (tm) S.timerIv = setInterval(() => { const el = $('#tmEl'), t = S.data && S.data.timer; if (el && t) el.textContent = hmShort(Math.max(0, Math.round((Date.now() - new Date(t.start)) / 60000))); }, 30000);
+}
+const isoLocal = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+async function timerStart() {
+  if (S.data.timer) return;
+  await save('Таймер: старт роботи', d => { d.timer = { start: isoLocal(new Date()) }; });
+}
+async function timerCancel() {
+  if (!S.data.timer || !confirm('Скасувати таймер без запису часу?')) return;
+  await save('Таймер: скасовано', d => { delete d.timer; });
+}
+async function timerStop() {
+  const t = S.data.timer; if (!t) return;
+  const date = t.start.slice(0, 10), min = Math.round((Date.now() - new Date(t.start)) / 60000);
+  if (min < 1) { if (await save('Таймер: менше хвилини, не записано', d => { delete d.timer; })) toast('Менше хвилини — не записано'); return; }
+  if (min > 960 && !confirm(`Таймер працював ${Math.round(min / 60)} год. Записати все?`)) {
+    const ex = S.data.work.find(x => x.date === date);
+    return workForm(ex, { minutes: (ex && ex.minutes || 0) + min, clearTimer: true, date });
+  }
+  const ok = await save(`Таймер: ${dmy(date)} +${hmShort(min)}`, d => {
+    const w = d.work.find(x => x.date === date);
+    if (w) { w.minutes = (w.minutes || 0) + min; w.dayoff = false; } else d.work.push({ id: uid('w'), date, minutes: min, dayoff: false, note: '' });
+    delete d.timer;
+  });
+  if (ok) toast(`Записано ${hmShort(min)} за ${dmy(date).slice(0, 5)}`);
 }
 
 /* ===== items analytics ===== */
@@ -913,11 +948,12 @@ function expenseForm(e) {
   });
 }
 
-function workForm(w) {
-  const edit = !!w, h = w && w.minutes != null ? Math.floor(w.minutes / 60) : '', m = w && w.minutes != null ? Math.round(w.minutes % 60) : '';
+function workForm(w, pre) {
+  const edit = !!w, mn = pre ? pre.minutes : w ? w.minutes : null, h = mn != null ? Math.floor(mn / 60) : '', m = mn != null ? Math.round(mn % 60) : '';
+  const ct = d => { if (pre && pre.clearTimer) delete d.timer; };
   openSheet(`<h3>${edit ? 'Редагувати час' : 'Час роботи'}</h3>
     ${w && w.source ? `<div class="src">Запис у нотатці: ${esc(w.source)}</div>` : ''}
-    <label class="field"><span>Дата</span><input id="fDate" type="date" value="${w ? w.date : todayISO()}"></label>
+    <label class="field"><span>Дата</span><input id="fDate" type="date" value="${pre ? pre.date : w ? w.date : todayISO()}"></label>
     <div class="row2"><label class="field"><span>Години</span><input id="fH" type="number" inputmode="numeric" min="0" value="${h}" placeholder="0"></label>
     <label class="field"><span>Хвилини</span><input id="fM" type="number" inputmode="numeric" min="0" max="59" value="${m}" placeholder="0"></label></div>
     <label class="check"><input id="fOff" type="checkbox" ${w && w.dayoff ? 'checked' : ''}> Вихідний</label>
@@ -931,13 +967,95 @@ function workForm(w) {
       const hh = parseInt(el.querySelector('#fH').value || '0', 10), mm = parseInt(el.querySelector('#fM').value || '0', 10);
       if (!date) return toast('Вкажіть дату'); if (!(hh >= 0 && mm >= 0 && mm < 60)) return toast('Перевірте години і хвилини');
       const minutes = off && !hh && !mm ? null : hh * 60 + mm;
-      const ok = edit ? await save(`Змінено час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => Object.assign(d.work.find(x => x.id === w.id), { date, minutes, dayoff: off, note }))
-        : await save(`Час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => d.work.push({ id: uid('w'), date, minutes, dayoff: off, note }));
+      const ok = edit ? await save(`Змінено час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => Object.assign(d.work.find(x => x.id === w.id), { date, minutes, dayoff: off, note }, ct(d)))
+        : await save(`Час роботи ${dmy(date)}: ${off ? 'вихідний' : hmShort(minutes)}`, d => { d.work.push({ id: uid('w'), date, minutes, dayoff: off, note }); ct(d); });
       if (!ok) return;
       closeSheet(); focusDate(date); render();
     };
     if (edit) el.querySelector('#del').onclick = async () => { if (!confirm(`Видалити запис за ${dmy(w.date)}?`)) return; if (await save(`Видалено час роботи ${dmy(w.date)}`, d => { d.work = d.work.filter(x => x.id !== w.id); })) closeSheet(); };
   });
+}
+
+/* ===== export to Excel ===== */
+const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = XLSX_URL; s.onload = res; s.onerror = () => rej(new Error('xlsx')); document.head.appendChild(s); });
+}
+function exportSheet() {
+  if (!S.data) return;
+  const today = todayISO(), accs = S.data.accounts || [];
+  const owners = [...new Set(accs.map(a => a.owner).filter(Boolean))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
+  const whoOpts = [{ v: 'all', t: 'Усі' }].concat(owners.map(o => ({ v: 'o:' + o, t: o })), accs.map(a => ({ v: 'a:' + a.id, t: a.id })));
+  const sel = S.month ? P() : null;
+  openSheet(`<h3>Вивантажити в Excel</h3>
+    <label class="field"><span>Період</span><select id="xPer">
+      <option value="month">Цей місяць</option>
+      ${sel ? `<option value="sel" selected>Обраний зверху: ${esc(sel.name)}</option>` : ''}
+      <option value="year">Весь ${today.slice(0, 4)} рік</option>
+      <option value="all">За весь час</option>
+      <option value="custom">Свій період</option></select></label>
+    <div class="row2" id="xCust" style="display:none"><label class="field"><span>Від</span><input id="xFrom" type="date" value="${today.slice(0, 7)}-01"></label>
+    <label class="field"><span>До</span><input id="xTo" type="date" value="${today}"></label></div>
+    <label class="field"><span>Хто</span><select id="xWho">${whoOpts.map(o => `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join('')}</select></label>
+    <button class="btn" id="ok">Завантажити .xlsx</button>
+    <button class="btn ghost" id="cancel">Скасувати</button>`, el => {
+    el.querySelector('#cancel').onclick = closeSheet;
+    const per = el.querySelector('#xPer');
+    per.onchange = () => { el.querySelector('#xCust').style.display = per.value === 'custom' ? '' : 'none'; };
+    el.querySelector('#ok').onclick = async () => {
+      let from, to;
+      if (per.value === 'month') { const ym = ymOf(today); from = `${ym}-01`; to = `${ym}-${pad2(daysIn(ym))}`; }
+      else if (per.value === 'sel') { from = sel.start; to = sel.end; }
+      else if (per.value === 'year') { from = `${today.slice(0, 4)}-01-01`; to = `${today.slice(0, 4)}-12-31`; }
+      else if (per.value === 'all') { const a = period('ALL'); from = a.start; to = a.end; }
+      else { from = el.querySelector('#xFrom').value; to = el.querySelector('#xTo').value; }
+      if (!from || !to || from > to) return toast('Перевірте період');
+      toast('Готую файл…', 10000);
+      try { await loadXLSX(); buildXlsx(from, to, el.querySelector('#xWho').value); closeSheet(); toast('Файл готовий ✓'); }
+      catch (e) { toast('Не вдалося підготувати файл. Перевірте інтернет.', 4000); }
+    };
+  });
+}
+function buildXlsx(from, to, who) {
+  const accs = S.data.accounts || [], accBy = Object.fromEntries(accs.map(a => [a.id, a]));
+  const accOk = who === 'all' ? null : who.startsWith('o:') ? new Set(accs.filter(a => a.owner === who.slice(2)).map(a => a.id)) : new Set([who.slice(2)]);
+  const R = arr => inRange(arr, from, to), byDate = (a, b) => a.date.localeCompare(b.date);
+  const D = iso => ({ t: 'n', v: (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 864e5, z: 'dd.mm.yyyy' });
+  const N = v => ({ t: 'n', v: r2(v || 0), z: '#,##0.00' });
+  const hmm = min => `${Math.floor(min / 60)}:${pad2(Math.round(min % 60))}`;
+  const sl = R(sales()).filter(x => !accOk || accOk.has(x.account)).sort(byDate);
+  const its = buildItems().items.filter(x => x.date >= from && x.date <= to && (!accOk || accOk.has(x.acc))).sort(byDate);
+  const exAll = R(S.data.expenses).sort(byDate);
+  const ex = accOk ? exAll.filter(e => accOk.has(e.account || (e.desc || '').split(' · ')[0])) : exAll;
+  const wk = who === 'all' ? R(S.data.work).sort(byDate) : null;
+  const wb = XLSX.utils.book_new();
+  const add = (name, rows, cols) => { const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = cols.map(wch => ({ wch })); XLSX.utils.book_append_sheet(wb, ws, name); };
+  const sAmt = sum(sl, x => x.amount), sItems = sum(sl, x => x.items);
+  add('Продажі', [['Дата', 'Акаунт', 'Платформа', 'Власник', 'Речей', 'Сума, zł']]
+    .concat(sl.map(x => { const a = accBy[x.account] || {}; return [D(x.date), x.account, (a.platform || 'vinted') === 'ebay' ? 'eBay' : 'Vinted', a.owner || '', x.items, N(x.amount)]; }))
+    .concat([['Разом', '', '', '', sItems, N(sAmt)]]), [12, 18, 12, 12, 8, 12]);
+  add('Речі', [['Дата', 'Акаунт', 'Назва', 'Ціна, zł', 'Тип', 'Бренд']]
+    .concat(its.map(x => [D(x.date), x.acc, x.name, N(x.price), itemCat(x), x.brand || ''])), [12, 18, 44, 12, 16, 16]);
+  const eSum = sum(ex, x => x.amount);
+  const exRows = [['Дата', 'Категорія', 'На що/опис', 'Акаунт', 'Кількість речей', 'Сума, zł', 'Примітка']]
+    .concat(ex.map(e => [D(e.date), e.category, e.desc || '', e.account || '', e.qty || '', N(e.amount), e.note || ''])).concat([['Разом', '', '', '', '', N(eSum), '']]);
+  if (accOk) exRows.push(['Інші витрати спільні — не включені']);
+  add('Витрати', exRows, [12, 20, 28, 18, 10, 12, 30]);
+  if (wk) {
+    const wMin = sum(wk, x => x.minutes);
+    add('Час роботи', [['Дата', 'Хвилини', 'Години (г:хх)', 'Вихідний', 'Примітка']]
+      .concat(wk.map(x => [D(x.date), x.minutes == null ? '' : x.minutes, x.minutes == null ? '' : hmm(x.minutes), x.dayoff ? 'так' : 'ні', x.note || '']))
+      .concat([['Разом', wMin, hmm(wMin), '', '']]), [12, 10, 14, 10, 30]);
+  }
+  const sum_ = [['Місяць', 'Продажі, zł', 'Речей', 'Витрати, zł', 'Прибуток, zł', 'Години']];
+  for (let k = ymOf(from); k <= ymOf(to); k = shiftYM(k, 1)) {
+    const s = sum(inYM(sl, k), x => x.amount), n = sum(inYM(sl, k), x => x.items), e = sum(inYM(ex, k), x => x.amount), w = wk ? sum(inYM(wk, k), x => x.minutes) : null;
+    sum_.push([monthName(k), N(s), n, N(e), N(r2(s - e)), w == null ? '' : hmm(w)]);
+  }
+  sum_.push(['Разом', N(sAmt), sItems, N(eSum), N(r2(sAmt - eSum)), wk ? hmm(sum(wk, x => x.minutes)) : '']);
+  add('Підсумок', sum_, [18, 14, 8, 14, 14, 10]);
+  XLSX.writeFile(wb, `Sell-Analytics_${from}_${to}.xlsx`);
 }
 
 /* ===== start ===== */

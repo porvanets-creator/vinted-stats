@@ -252,3 +252,4 @@ nav a:active,.nav-group:active,.nav-switch:active,.drawer-foot a:active,.info-ro
 
 .hbar{height:4px;border-radius:99px;background:var(--soft);margin-top:5px;overflow:hidden;min-width:70px}
 .hbar i{display:block;height:100%;background:var(--ink);border-radius:99px}
+.card.dark .btn:not(.ghost){background:var(--dark-ink);color:var(--dark)}
