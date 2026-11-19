@@ -49,6 +49,7 @@ const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const nf2 = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const money = n => nf2.format(r2(n || 0)) + ' zł';
+const m0 = n => Math.round(n || 0).toLocaleString("uk-UA") + " zł";
 const moneyShort = n => Math.abs(n) >= 1000 ? (n / 1000).toLocaleString('uk-UA', { maximumFractionDigits: 1 }) + 'k' : String(Math.round(n));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ymOf = d => d.slice(0, 7);
@@ -149,7 +150,7 @@ function renderNav() {
   const accs = S.data ? S.data.accounts : [];
   const vAccs = accs.filter(a => (a.platform || 'vinted') === 'vinted'), eAccs = accs.filter(a => a.platform === 'ebay');
   const owners = [...new Set(vAccs.map(a => a.owner || 'Інші'))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
-  let html = link('panel', 'home', 'Головна'), inner = '';
+  let html = link('panel', 'home', 'Головна') + link('items', 'chart', 'Аналітика товарів'), inner = '';
   owners.forEach(o => {
     const list = vAccs.filter(a => (a.owner || 'Інші') === o);
     const open = store.get('vs_grp_' + o) === '1' || list.some(a => S.route === 'acc:' + a.id);
@@ -292,6 +293,7 @@ function render() {
   if (r === 'settings' || !S.data) return viewSettings();
   if (r === 'data') return viewData();
   if (r === 'taxes') return viewTaxes();
+  if (r === 'items') return viewItems();
   if (r.startsWith('acc:')) { fab.hidden = false; fab.onclick = () => saleForm(r.slice(4)); return viewAccount(r.slice(4)); }
   if (r === 'expenses') { fab.hidden = false; fab.onclick = () => expenseForm(); return viewExpenses(); }
   if (r === 'work') { fab.hidden = false; fab.onclick = () => workForm(); return viewWork(); }
@@ -650,6 +652,155 @@ function viewWork() {
       : `<div class="empty">За ${perWord(p)} записів немає.<br>Натисніть «+», щоб додати.</div>`}
   </div>`;
   $('#view').querySelectorAll('tr.tap').forEach(tr => tr.onclick = () => workForm(w.find(x => x.id === tr.dataset.id)));
+}
+
+/* ===== items analytics ===== */
+const DOW_MON = ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
+const DOW_ON = ['понеділок','вівторок','середу','четвер','пʼятницю','суботу','неділю'];
+const LBLOCKS = [[0, 6], [6, 9], [9, 12], [12, 15], [15, 18], [18, 21], [21, 24]];
+const monIdx = d => (new Date(d + 'T12:00').getDay() + 6) % 7;
+const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const daysBetween = (listed, sold) => Math.max(0, Math.round((new Date(sold + 'T12:00') - new Date(listed.slice(0, 10) + 'T12:00')) / 864e5));
+const daysTxt = n => n == null ? "—" : Math.round(n) < 1 ? "того ж дня" : `≈${Math.round(n)} дн.`;
+const itemCat = it => it.cat || 'Інше';
+const itemsWho = () => store.get('vs_items_who') || 'all';
+function itemsGroup(arr, keyFn) {
+  const m = new Map();
+  arr.forEach(it => { const k = keyFn(it); if (k == null) return; if (!m.has(k)) m.set(k, []); m.get(k).push(it); });
+  return [...m.entries()].map(([k, list]) => {
+    const total = sum(list, x => x.price), days = list.filter(x => x.listed && x.listed.length >= 10).map(x => daysBetween(x.listed, x.date));
+    const lp = list.filter(x => x.list_price > 0 && x.price != null).map(x => (x.list_price - x.price) / x.list_price);
+    return { k, list, n: list.length, total, avg: list.length ? total / list.length : 0, days: median(days), nDays: days.length, torg: lp.length ? lp.reduce((a, b) => a + b, 0) / lp.length : null };
+  });
+}
+function itemsSheet(title, list) {
+  const rows = [...list].sort((a, b) => b.date.localeCompare(a.date));
+  openSheet(`<h3>${esc(title)}</h3>
+    <div class="plist" style="max-height:60vh">${rows.map(x => `<div class="pitem"><span>${esc(x.name || '—')}<small class="sub">${dmy(x.date)} · ${esc(x.acc || '')}</small></span><b>${money(x.price)}</b></div>`).join('')}</div>
+    <button class="btn ghost" id="cancel">Закрити</button>`, el => { el.querySelector('#cancel').onclick = closeSheet; });
+}
+function viewItems() {
+  setTitle('Аналітика товарів');
+  const all = Array.isArray(S.data.items) ? S.data.items.filter(x => x && x.date && x.price != null) : [];
+  if (!all.length) { $('#view').innerHTML = '<div class="card"><div class="empty">Дані про товари ще не додані.</div></div>'; return; }
+  // who filter
+  const accs = S.data.accounts || [], owners = [...new Set(accs.map(a => a.owner).filter(Boolean))].sort((a, b) => (OWNER_ORDER.indexOf(a) + 1 || 99) - (OWNER_ORDER.indexOf(b) + 1 || 99));
+  const whoOpts = [{ v: 'all', t: 'Усі' }].concat(owners.map(o => ({ v: 'o:' + o, t: o })), accs.map(a => ({ v: 'a:' + a.id, t: a.id })));
+  let who = itemsWho(); if (!whoOpts.some(o => o.v === who)) who = 'all';
+  const accOk = who === 'all' ? null : who.startsWith('o:') ? new Set(accs.filter(a => a.owner === who.slice(2)).map(a => a.id)) : new Set([who.slice(2)]);
+  const p = P();
+  const items = all.filter(it => (!accOk || accOk.has(it.acc)) && (p.kind === 'all' || (it.date >= p.start && it.date <= p.end)));
+  const head = `<div class="card"><label class="field" style="margin:0"><span>Хто</span><select id="itWho">${whoOpts.map(o => `<option value="${esc(o.v)}" ${o.v === who ? 'selected' : ''}>${esc(o.t)}</option>`).join('')}</select></label></div>`;
+  const bind = () => { $('#itWho').onchange = e => { store.set('vs_items_who', e.target.value); render(); }; };
+  if (!items.length) { $('#view').innerHTML = head + `<div class="card"><div class="empty">За цей період немає проданих речей.</div></div>`; bind(); return; }
+
+  const cats = itemsGroup(items, itemCat), cnt = items.length, total = sum(items, x => x.price);
+  const sortedCats = [...cats].sort((a, b) => b.n - a.n || b.total - a.total);
+  const topCat = sortedCats[0], maxN = topCat.n;
+  const rich = cats.filter(c => c.n >= 3).sort((a, b) => b.avg - a.avg)[0];
+
+  // block 3
+  const prof = cats.filter(c => c.n >= 3).sort((a, b) => b.avg - a.avg);
+  const fast = prof.filter(c => c.nDays >= 3 && c.days != null).sort((a, b) => a.days - b.days)[0];
+  const torgTxt = v => { if (v == null) return '—'; const r = Math.round(v * 100); return r > 0 ? `−${r}%` : r < 0 ? `+${-r}%` : '0%'; };
+  const take3 = prof.length ? `Найдорожче продаються ${esc(prof[0].k)} (≈${Math.round(prof[0].avg)} zł)${fast ? `, найшвидше — ${esc(fast.k)} (${daysTxt(fast.days)})` : ''}.` : 'Замало даних: потрібно хоча б 3 речі в категорії.';
+
+  // block 4
+  const brands = itemsGroup(items, x => x.brand ? String(x.brand).trim() : null).sort((a, b) => b.n - a.n || b.total - a.total).slice(0, 10);
+
+  // block 5
+  const dowC = Array(7).fill(0), hourC = Array(24).fill(0); let withTime = 0;
+  items.forEach(it => {
+    dowC[monIdx(it.date)]++;
+    if (it.time && /^\d{1,2}:/.test(it.time)) { hourC[Math.min(23, +it.time.split(':')[0])]++; withTime++; }
+  });
+  const bestDow = dowC.indexOf(Math.max(...dowC));
+  let bestH = -1, bestHS = 0;
+  if (withTime) for (let h = 0; h <= 21; h++) { const s = hourC[h] + hourC[h + 1] + hourC[h + 2]; if (s > bestHS) { bestHS = s; bestH = h; } }
+  const take5 = `Найбільше замовлень — у ${DOW_ON[bestDow]} (${dowC[bestDow]})${bestH >= 0 ? `, найактивніший час — ${bestH}:00–${bestH + 3}:00 (${bestHS})` : ''}.`;
+
+  // block 6
+  const lst = items.filter(x => x.listed && x.listed.length >= 10).map(x => ({ d: monIdx(x.listed.slice(0, 10)), b: x.listed.length >= 13 ? (h => h < 6 ? 0 : Math.floor(h / 3) - 1)(+x.listed.slice(11, 13)) : null, days: daysBetween(x.listed, x.date) }));
+  const bucket = (keyFn, labelFn) => Array.from({ length: 7 }, (_, i) => { const l = lst.filter(x => keyFn(x) === i); return { i, label: labelFn(i), n: l.length, med: median(l.map(x => x.days)) }; });
+  const byListDow = bucket(x => x.d, i => DOW_MON[i]);
+  const byListHr = bucket(x => x.b, i => `${LBLOCKS[i][0]}–${LBLOCKS[i][1]}`);
+  const combos = [];
+  for (let d = 0; d < 7; d++) for (let b = 0; b < 7; b++) { const l = lst.filter(x => x.d === d && x.b === b); if (l.length >= 3) combos.push({ d, b, n: l.length, med: median(l.map(x => x.days)) }); }
+  const bd = byListDow.filter(x => x.n >= 3).sort((a, b) => a.med - b.med)[0], bb = byListHr.filter(x => x.n >= 3).sort((a, b) => a.med - b.med)[0];
+  const bc = combos.sort((a, b) => a.med - b.med)[0];
+  const take6 = bc ? `Найшвидше продаються речі, виставлені у ${DOW_ON[bc.d]} о ${LBLOCKS[bc.b][0]}–${LBLOCKS[bc.b][1]} (${daysTxt(bc.med)}).`
+    : bd || bb ? `Найшвидше продаються речі, виставлені ${bd ? `у ${DOW_ON[bd.i]} (${daysTxt(bd.med)})` : ''}${bd && bb ? ', ' : ''}${bb ? `о ${bb.label} (${daysTxt(bb.med)})` : ''}.` : 'Замало даних про дату виставлення.';
+  // recommendation card
+  const DOW_NOM = ['понеділок','вівторок','середа','четвер','пʼятниця','субота','неділя'];
+  let rec;
+  if (withTime < 20) rec = `<div class="big" style="font-size:17px;white-space:normal">Замало даних для рекомендації</div>`;
+  else {
+    let win = null;
+    for (let len = 3; len <= 12 && !win; len++) {
+      for (let s = 0; s + len <= 24; s++) {
+        let c = 0; for (let h = s; h < s + len; h++) c += hourC[h];
+        if (c >= 0.6 * withTime && (!win || c > win.c)) win = { s, e: s + len, c };
+      }
+    }
+    const hh = h => String(h).padStart(2, '0') + ':00';
+    const dayAvg = cnt / 7, top3 = dowC.map((c, i) => ({ c, i })).sort((a, b) => b.c - a.c || a.i - b.i).slice(0, 3);
+    const daysLine = top3.reduce((a, x) => a + x.c, 0) / 3 < dayAvg * 1.05 ? 'Дні тижня майже не впливають' : `Найкращі дні: ${top3.map(x => DOW_NOM[x.i]).join(', ')}`;
+    const allMed = median(lst.map(x => x.days));
+    let worst = null;
+    if (allMed != null) LBLOCKS.forEach((_, b) => {
+      const l = lst.filter(x => x.b === b); if (l.length < 5) return;
+      const m = median(l.map(x => x.days));
+      if (m >= 2 * allMed && m - allMed >= 2 && (!worst || m > worst.m)) worst = { b, m };
+    });
+    rec = win
+      ? `<div class="big">з ${hh(win.s)} до ${hh(win.e)}</div><div style="font-weight:600;margin:2px 0 6px">${daysLine}</div>
+         <div class="sub">У цей час приходить ${Math.round(win.c / withTime * 100)}% замовлень.</div>
+         ${worst ? `<div class="sub">Речі, виставлені з ${hh(LBLOCKS[worst.b][0])} до ${hh(LBLOCKS[worst.b][1] % 24)}, продаються повільніше (${daysTxt(worst.m)} проти ${daysTxt(allMed)}).</div>` : ''}`
+      : `<div class="big" style="font-size:17px;white-space:normal">Замовлення розкидані по всій добі</div><div style="font-weight:600;margin:2px 0 6px">${daysLine}</div>`;
+    rec += `<div class="sub" style="margin-top:8px;font-size:12px">на основі ${withTime} замовлень</div>`;
+  }
+  const bTable = (title, arr) => `<div class="scroll-x"><table class="table"><thead><tr><th>${title}</th><th>Речей</th><th>Днів до<br>продажу</th></tr></thead><tbody>${arr.map(x => `<tr><td>${x.label}</td><td>${x.n}</td><td>${x.n >= 3 ? `<b>${daysTxt(x.med)}</b>` : '<span class="muted">Мало даних</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+
+  $('#view').innerHTML = head + `
+  <div class="grid">
+    ${kpi('box', 'Продано речей', cnt, `<div class="sub">на ${money(total)}</div>`, 'dark')}
+    ${kpi('star', 'Середній чек речі', money(total / cnt))}
+    ${kpi('trophy', 'Найпопулярніше', esc(topCat.k), `<div class="sub">${topCat.n} шт.</div>`)}
+    ${kpi('trend', 'Найдорожче в середньому', rich ? esc(rich.k) : '—', `<div class="sub">${rich ? `≈${money(rich.avg)}` : 'потрібно від 3 речей'}</div>`)}
+  </div>
+  <div class="card dark"><div class="label">${ICONS.clock}Рекомендація: коли виставляти</div>${rec}</div>
+  <div class="card">
+    <div class="section-title"><h2>Що продається найбільше</h2><span class="sub">${esc(p.name)}</span></div>
+    <div class="scroll-x"><table class="table"><thead><tr><th>Тип</th><th>Шт.</th><th>Сума</th><th>Сер. чек</th></tr></thead><tbody>${sortedCats.map((c, i) => `<tr class="tap" data-c="${i}"><td>${esc(c.k)}<div class="hbar"><i style="width:${Math.round(c.n / maxN * 100)}%"></i></div></td><td>${c.n}</td><td>${m0(c.total)}</td><td>${m0(c.avg)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="sub" style="margin-top:8px">Натисніть на рядок, щоб побачити речі</div>
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Що найвигідніше</h2><span class="sub">від 3 речей</span></div>
+    <p class="sub" style="margin:0 0 8px">${take3}</p>
+    ${prof.length ? `<div class="scroll-x"><table class="table" style="font-size:13px"><thead><tr><th>Тип</th><th>Сер. чек</th><th>Днів до<br>продажу</th><th>Торг</th></tr></thead><tbody>${prof.map(c => `<tr><td>${esc(c.k)}</td><td><b>${m0(c.avg)}</b></td><td>${c.nDays ? daysTxt(c.days) : '—'}</td><td>${torgTxt(c.torg)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Мало даних</div>'}
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Топ брендів</h2><span class="sub">топ 10</span></div>
+    ${brands.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Бренд</th><th>Шт.</th><th>Сума</th><th>Сер. чек</th></tr></thead><tbody>${brands.map(b => `<tr><td>${esc(b.k)}</td><td>${b.n}</td><td>${m0(b.total)}</td><td>${m0(b.avg)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Бренди не вказані</div>'}
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Коли купують</h2><span class="sub">за днями тижня</span></div>
+    <div class="chart-box small"><canvas id="cItDow"></canvas></div>
+    ${withTime ? `<div class="section-title" style="margin-top:14px"><h2>За годинами</h2><span class="sub">${withTime} з ${cnt} речей</span></div><div class="chart-box small"><canvas id="cItHour"></canvas></div>` : '<div class="sub" style="margin-top:10px">Час замовлення невідомий.</div>'}
+    <p class="sub" style="margin:10px 0 0">${take5}<br>за часом замовлення</p>
+  </div>
+  <div class="card">
+    <div class="section-title"><h2>Коли виставляти</h2><span class="sub">${lst.length} речей з датою</span></div>
+    <p class="sub" style="margin:0 0 8px">${take6}</p>
+    ${lst.length ? bTable('День виставлення', byListDow) + '<div style="height:10px"></div>' + bTable('Година виставлення', byListHr) : '<div class="empty">Мало даних</div>'}
+    <div class="sub" style="margin-top:8px">Дата виставлення є не для всіх акаунтів. Днів до продажу — медіана.</div>
+  </div>`;
+  bind();
+  $('#view').querySelectorAll('tr.tap[data-c]').forEach(tr => tr.onclick = () => { const c = sortedCats[+tr.dataset.c]; itemsSheet(`${c.k} · ${c.n} шт.`, c.list); });
+  const ink = cssVar('--ink'), bar = (id, labels, data) => chart(id, { type: 'bar', data: { labels, datasets: [{ data, backgroundColor: ink, borderRadius: 6, borderSkipped: false, maxBarThickness: 28 }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw} шт.` } } }, scales: { x: { grid: { display: false }, border: { display: false } }, y: { ...gridOpts(), beginAtZero: true, ticks: { precision: 0 } } } } });
+  bar('cItDow', DOW_MON, dowC);
+  if (withTime) bar('cItHour', hourC.map((_, h) => String(h)), hourC);
 }
 
 function viewSettings(err) {

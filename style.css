@@ -249,3 +249,6 @@ nav a:active,.nav-group:active,.nav-switch:active,.drawer-foot a:active,.info-ro
 .nav-sub:not([hidden]){animation:fadeUp .25s ease both}
 .data-body:not([hidden]){animation:fadeUp .25s ease both}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+.hbar{height:4px;border-radius:99px;background:var(--soft);margin-top:5px;overflow:hidden;min-width:70px}
+.hbar i{display:block;height:100%;background:var(--ink);border-radius:99px}
